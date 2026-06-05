@@ -1,0 +1,11 @@
+torch
+numpy
+pandas
+matplotlib
+seaborn
+flwr
+adversarial-robustness-toolbox
+scikit-learn
+pytest
+torchvision
+tqdm
