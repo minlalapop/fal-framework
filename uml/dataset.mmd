@@ -1,0 +1,84 @@
+classDiagram
+direction TB
+
+class DatasetLoader {
+  <<abstract>>
+  +load() tuple
+}
+
+class ArrayDatasetLoader {
+  +X
+  +y
+  +load() tuple
+}
+
+class CustomCSVDatasetLoader {
+  +pd
+  +path
+  +target
+  +load() tuple
+}
+
+class BuiltinDatasetLoader {
+  +SUPPORTED_DATASETS
+  +name
+  +params
+  +sklearn_datasets
+  +np
+  +torch
+  +torchvision_datasets
+  +transforms
+  +load() tuple
+  -_load_iris() tuple
+  -_load_digits() tuple
+  -_load_wine() tuple
+  -_load_mnist() tuple
+  -_load_fashion_mnist() tuple
+  -_load_cifar10() tuple
+  -_load_sklearn_dataset(loader_name) tuple
+  -_load_torchvision_dataset(name) tuple
+}
+
+class ClientSplitter {
+  <<abstract>>
+  +split(X, y, num_clients) list
+}
+
+class IIDSplitter {
+  +shuffle
+  +random_state
+  +split(X, y, num_clients) list
+}
+
+class NonIIDSplitter {
+  +shards_per_client
+  +shuffle
+  +random_state
+  +split(X, y, num_clients) list
+}
+
+class DatasetManager {
+  +loader
+  +splitter
+  +num_clients
+  +test_size
+  +random_state
+  +shuffle
+  +train_test_split
+  +clients_data
+  +test_data
+  +prepare() DatasetManager
+  +get_clients_data() list
+  +get_test_data() tuple
+  -_train_test_split(X, y) tuple
+  -_validate_split_params() None
+  -_fallback_train_test_split(X, y) tuple
+}
+
+DatasetLoader <|-- ArrayDatasetLoader
+DatasetLoader <|-- CustomCSVDatasetLoader
+DatasetLoader <|-- BuiltinDatasetLoader
+ClientSplitter <|-- IIDSplitter
+ClientSplitter <|-- NonIIDSplitter
+DatasetManager o-- DatasetLoader : loader
+DatasetManager o-- ClientSplitter : splitter

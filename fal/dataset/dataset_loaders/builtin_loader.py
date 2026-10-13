@@ -24,7 +24,7 @@ class BuiltinDatasetLoader(DatasetLoader):
 
         if self.name in {"digits", "iris", "wine"}:
             self.sklearn_datasets = _require_sklearn_datasets()
-        elif self.name in {"fashion_mnist", "mnist"}:
+        elif self.name in {"cifar10", "fashion_mnist", "mnist"}:
             (
                 self.np,
                 self.torch,
@@ -55,9 +55,12 @@ class BuiltinDatasetLoader(DatasetLoader):
     def _load_fashion_mnist(self) -> tuple[Any, Any]:
         return self._load_torchvision_dataset("fashion_mnist")
 
+    def _load_cifar10(self) -> tuple[Any, Any]:
+        return self._load_torchvision_dataset("cifar10")
+
     def _load_sklearn_dataset(self, loader_name: str) -> tuple[Any, Any]:
         bunch = getattr(self.sklearn_datasets, loader_name)()
-        return bunch.data, bunch.target
+        return self._apply_sample(bunch.data, bunch.target)
 
     def _load_torchvision_dataset(self, name: str) -> tuple[Any, Any]:
         root = self.params.get("root", "./data")
@@ -66,16 +69,44 @@ class BuiltinDatasetLoader(DatasetLoader):
         transform = self.params.get("transform", self.transforms.ToTensor())
 
         dataset_cls = {
+            "cifar10": self.torchvision_datasets.CIFAR10,
             "mnist": self.torchvision_datasets.MNIST,
             "fashion_mnist": self.torchvision_datasets.FashionMNIST,
         }[name]
         dataset = dataset_cls(root=root, train=train, download=download, transform=transform)
         X = self.torch.stack([sample for sample, _ in dataset]).numpy()
+        if name in {"mnist", "fashion_mnist"}:
+            X = X.reshape(len(X), -1)
         y = self.np.asarray([label for _, label in dataset])
-        return X, y
+        return self._apply_sample(X, y)
+
+    def _apply_sample(self, X: Any, y: Any) -> tuple[Any, Any]:
+        samples_per_class = self.params.get("samples_per_class")
+        sample_size = self.params.get("sample_size")
+        if samples_per_class is None and sample_size is None:
+            return X, y
+
+        np = self.np or _require_numpy()
+        y_array = np.asarray(y)
+        rng = np.random.default_rng(self.params.get("random_state"))
+
+        if samples_per_class is not None:
+            selected = []
+            for label in np.unique(y_array):
+                label_indices = np.flatnonzero(y_array == label)
+                count = min(int(samples_per_class), len(label_indices))
+                selected.extend(rng.choice(label_indices, size=count, replace=False))
+            indices = np.asarray(selected)
+        else:
+            count = min(int(sample_size), len(y_array))
+            indices = rng.choice(len(y_array), size=count, replace=False)
+
+        rng.shuffle(indices)
+        return X[indices], y_array[indices]
 
 
 BuiltinDatasetLoader.SUPPORTED_DATASETS = {
+    "cifar10": BuiltinDatasetLoader._load_cifar10,
     "digits": BuiltinDatasetLoader._load_digits,
     "fashion_mnist": BuiltinDatasetLoader._load_fashion_mnist,
     "iris": BuiltinDatasetLoader._load_iris,
@@ -98,6 +129,14 @@ def _require_sklearn_datasets() -> Any:
     return datasets
 
 
+def _require_numpy() -> Any:
+    try:
+        np = import_module("numpy")
+    except ImportError as exc:
+        raise ImportError("Dataset sampling requires `numpy`.") from exc
+    return np
+
+
 def _require_torchvision_dataset_deps() -> tuple[Any, Any, Any, Any]:
     try:
         np = import_module("numpy")
@@ -106,6 +145,6 @@ def _require_torchvision_dataset_deps() -> tuple[Any, Any, Any, Any]:
         transforms = import_module("torchvision.transforms")
     except ImportError as exc:
         raise ImportError(
-            "MNIST and Fashion-MNIST loading require `numpy`, `torch`, and `torchvision`."
+            "Torchvision datasets require `numpy`, `torch`, and `torchvision`."
         ) from exc
     return np, torch, datasets, transforms

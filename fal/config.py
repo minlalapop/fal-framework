@@ -36,6 +36,7 @@ class FALConfig:
     X: Any | None = None
     y: Any | None = None
     target: str | None = None
+    dataset_params: dict[str, Any] = field(default_factory=dict)
 
     model: Any | None = None
     model_params: dict[str, Any] = field(default_factory=dict)
@@ -116,6 +117,7 @@ class FALConfig:
             raise ValueError("`model` is required.")
 
     def _validate_mappings(self) -> None:
+        _ensure_mapping(self.dataset_params, "dataset_params")
         _ensure_mapping(self.model_params, "model_params")
         _ensure_mapping(self.attack_params, "attack_params")
         _ensure_mapping(self.trainer_params, "trainer_params")

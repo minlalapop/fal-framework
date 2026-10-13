@@ -1,0 +1,106 @@
+classDiagram
+direction LR
+
+class FLSystem {
+  <<FL_Orchestrator>>
+  +backend
+  +strategy
+  +num_rounds
+  +start(model, trainer, clients_data, test_data)
+}
+
+class FLBackend {
+  <<Backend_Interface>>
+  +start(model, trainer, clients_data, test_data, strategy, num_rounds)
+}
+
+class StrategyAdapter {
+  <<Strategy_Interface>>
+  +fl_params
+  +initial_parameters
+  +build_strategy()
+}
+
+class FlowerBackend {
+  <<Flower_Implementation>>
+  +client_factory
+  +server
+  +start(model, trainer, clients_data, test_data, strategy, num_rounds)
+}
+
+class FlowerClientFactory {
+  <<Client_Builder>>
+  +create_clients(model, trainer, clients_data, test_data)
+}
+
+class FlowerClientAdapter {
+  <<Client_Adapter>>
+  +fit(parameters, config)
+  +evaluate(parameters, config)
+  +get_parameters(config)
+}
+
+class FlowerParameterAdapter {
+  <<Parameter_Exchange>>
+  +get_parameters(model)
+  +set_parameters(model, parameters)
+  +supports(model)
+}
+
+class FlowerServerAdapter {
+  <<Simulation_Server>>
+  +start_server(clients, strategy, num_rounds)
+}
+
+class FedAvgStrategyAdapter {
+  <<Strategy>>
+}
+
+class FedProxStrategyAdapter {
+  <<Strategy>>
+}
+
+class FedAdamStrategyAdapter {
+  <<Strategy>>
+}
+
+class PyTorchParameterAdapter {
+  <<PyTorch_Params>>
+}
+
+class SklearnParameterAdapter {
+  <<Sklearn_Params>>
+}
+
+class Trainer {
+  <<External_FAL_Component>>
+}
+
+class Model {
+  <<External_FAL_Component>>
+}
+
+FLSystem --> FLBackend : uses
+FLSystem --> StrategyAdapter : uses
+
+FLBackend <|.. FlowerBackend
+FlowerBackend --> FlowerClientFactory : creates clients
+FlowerBackend --> FlowerServerAdapter : starts simulation
+FlowerBackend --> FlowerParameterAdapter : applies final params
+
+FlowerClientFactory --> FlowerClientAdapter : builds one per client
+FlowerClientAdapter --> FlowerParameterAdapter : exchanges model params
+FlowerClientAdapter --> Trainer : trains/evaluates
+FlowerClientAdapter --> Model : wraps local model
+
+StrategyAdapter <|-- FedAvgStrategyAdapter
+StrategyAdapter <|-- FedProxStrategyAdapter
+StrategyAdapter <|-- FedAdamStrategyAdapter
+
+FlowerParameterAdapter <|-- PyTorchParameterAdapter
+FlowerParameterAdapter <|-- SklearnParameterAdapter
+
+note for FLSystem "High-level FL entry point.\nDoes not know Flower internals."
+note for FLBackend "Backend abstraction.\nFlower can be replaced later."
+note for StrategyAdapter "Strategy abstraction.\nFedAvg, FedProx, FedAdam are plugged here."
+note for FlowerBackend "Flower-specific details stay behind this backend."

@@ -1,0 +1,141 @@
+classDiagram
+direction TB
+
+class FAL {
+  +config
+  +run() Any
+}
+
+class FALConfig {
+  +dataset
+  +X
+  +y
+  +target
+  +model
+  +model_params
+  +attack_type
+  +attack_params
+  +trainer_type
+  +trainer_params
+  +metrics
+  +loss
+  +num_clients
+  +num_rounds
+  +test_size
+  +iid
+  +shards_per_client
+  +random_state
+  +shuffle
+  +fl_backend
+  +fl_algorithm
+  +fl_params
+  +attack_backend
+  +verbose
+  +__post_init__() None
+  +validate() FALConfig
+  -_validate_data_source() None
+  -_validate_array_dataset() None
+  -_validate_named_dataset() None
+  -_validate_model() None
+  -_validate_mappings() None
+  -_validate_training() None
+  -_validate_metrics() None
+  -_validate_loss() None
+  -_validate_federated_learning() None
+  -_validate_runtime() None
+}
+
+class CoreBuilder {
+  +config
+  +build() Experiment
+  -_build_dataset_manager()
+  -_build_dataset_loader()
+  -_build_client_splitter()
+  -_build_model()
+  -_build_metrics()
+  -_build_loss()
+  -_build_attack()
+  -_build_trainer(model, metrics_manager, loss_manager, attack)
+  -_validate_model_fl_compatibility(model)
+  -_attack_only_needs_clean_fit(model)
+  -_build_fl_system()
+  -_build_run_config()
+  -_build_attack_display_config()
+  -_display_dataset()
+  -_metric_name(metric)
+  -_loss_name()
+}
+
+class Experiment {
+  +dataset_manager
+  +model
+  +trainer
+  +metrics_manager
+  +fl_system
+  +attack
+  +verbose
+  +execute() Any
+  -_should_save_model() bool
+}
+
+class FALResult {
+  +model
+  +history
+  +losses
+  +metrics
+  +backend
+  +raw_result
+  +artifact_paths
+  +raw_model
+  +latest_loss
+  +latest_metrics
+  +save(path) None
+  +save_outputs(directory, save_model) dict
+  +metric(name, round_number) Any
+  +summary(include_details) str
+  +print_summary(include_details) None
+  +details() str
+  +print_details() None
+  +__str__() str
+}
+
+class FALProgressReporter {
+  +verbose
+  +stream
+  +enabled
+  +colors
+  +progress_bar
+  +last_postfix
+  +total_rounds
+  +total_clients
+  +started_at
+  +round_started_at
+  +fit_status
+  +metric_names
+  +header_printed
+  +start(num_rounds, num_clients, run_config) None
+  +round_start(round_number) None
+  +fit_end(round_number, success_count, failure_count) None
+  +evaluate_end(round_number, loss, metrics) None
+  +finish() None
+  -_write(message) None
+  -_use_progress_bar() bool
+}
+
+class _Color {
+  +enabled
+  +bold(value) str
+  +dim(value) str
+  +blue(value) str
+  +green(value) str
+  +cyan(value) str
+  -_wrap(value, code) str
+}
+
+FAL *-- FALConfig : config
+FAL ..> CoreBuilder : builds
+CoreBuilder ..> Experiment : creates
+Experiment ..> FALResult : returns
+FALProgressReporter *-- _Color : colors
+
+note for CoreBuilder "FALBuilder = CoreBuilder alias in fal.builder"

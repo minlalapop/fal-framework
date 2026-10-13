@@ -20,6 +20,7 @@ class PyTorchModelAdapter(BaseModel):
         self.optimizer = model_params.get("optimizer")
         self.epochs = int(model_params.get("epochs", 1))
         self.batch_size = int(model_params.get("batch_size", 32))
+        self.predict_batch_size = int(model_params.get("predict_batch_size", self.batch_size))
         self.device = model_params.get("device")
 
         self._torch = _require_torch()
@@ -60,18 +61,27 @@ class PyTorchModelAdapter(BaseModel):
         return self
 
     def predict(self, X: Any) -> Any:
-        tensor_X = self._to_tensor(X).to(self.device)
+        tensor_X = self._to_tensor(X)
+        loader = self._torch.utils.data.DataLoader(
+            self._torch.utils.data.TensorDataset(tensor_X),
+            batch_size=self.predict_batch_size,
+            shuffle=False,
+        )
 
         self.model.eval()
+        predictions = []
         with self._torch.no_grad():
-            outputs = self.model(tensor_X)
+            for (batch_X,) in loader:
+                outputs = self.model(batch_X.to(self.device))
 
-        if outputs.ndim > 1 and outputs.shape[-1] > 1:
-            predictions = outputs.argmax(dim=-1)
-        else:
-            predictions = (outputs.reshape(-1) >= 0.5).long()
+                if outputs.ndim > 1 and outputs.shape[-1] > 1:
+                    batch_predictions = outputs.argmax(dim=-1)
+                else:
+                    batch_predictions = (outputs.reshape(-1) >= 0.5).long()
 
-        return predictions.detach().cpu().numpy()
+                predictions.append(batch_predictions.detach().cpu())
+
+        return self._torch.cat(predictions).numpy()
 
     def get_raw_model(self) -> Any:
         return self.model
@@ -87,6 +97,7 @@ class PyTorchModelAdapter(BaseModel):
             optimizer=cloned_optimizer,
             epochs=self.epochs,
             batch_size=self.batch_size,
+            predict_batch_size=self.predict_batch_size,
             device=str(self.device),
         )
 
@@ -110,6 +121,8 @@ class PyTorchModelAdapter(BaseModel):
             raise ValueError("`epochs` must be a positive integer.")
         if self.batch_size <= 0:
             raise ValueError("`batch_size` must be a positive integer.")
+        if self.predict_batch_size <= 0:
+            raise ValueError("`predict_batch_size` must be a positive integer.")
 
     def _make_tensor_dataset(self, X: Any, y: Any) -> Any:
         tensor_X = self._to_tensor(X)

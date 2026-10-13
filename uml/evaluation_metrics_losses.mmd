@@ -1,0 +1,138 @@
+classDiagram
+direction TB
+
+class EvaluationResult {
+  +loss
+  +metrics
+  +as_dict() dict
+}
+
+class BaseMetric {
+  <<abstract>>
+  +name
+  +compute(y_true, y_pred) Any
+}
+
+class MetricsManager {
+  +metrics
+  +compute_all(y_true, y_pred) dict
+}
+
+class MetricFactory {
+  -_registry
+  +REGISTRY
+  +register(name, metric_cls) None
+  +create(metrics_config) MetricsManager
+  +create_metric(config) BaseMetric
+  +available() tuple
+  -_normalize_name(value) str
+}
+
+class AccuracyMetric {
+  +name
+  +metrics
+  +compute(y_true, y_pred) float
+}
+
+class F1Metric {
+  +name
+  +metrics
+  +average
+  +zero_division
+  +compute(y_true, y_pred) float
+}
+
+class PrecisionMetric {
+  +name
+  +metrics
+  +average
+  +zero_division
+  +compute(y_true, y_pred) float
+}
+
+class RecallMetric {
+  +name
+  +metrics
+  +average
+  +zero_division
+  +compute(y_true, y_pred) float
+}
+
+class AUCMetric {
+  +name
+  +metrics
+  +kwargs
+  +compute(y_true, y_pred) float
+}
+
+class ConfusionMatrixMetric {
+  +name
+  +metrics
+  +labels
+  +compute(y_true, y_pred) list
+}
+
+class ClassificationReportMetric {
+  +name
+  +metrics
+  +labels
+  +target_names
+  +digits
+  +output_dict
+  +zero_division
+  +compute(y_true, y_pred) dict_or_str
+}
+
+class BaseEvaluationLoss {
+  <<abstract>>
+  +name
+  +compute(model, X, y_true) float
+}
+
+class EvaluationLossManager {
+  +loss
+  +compute(model, X, y_true) float_or_None
+}
+
+class EvaluationLossFactory {
+  -_registry
+  +register(name, loss_cls) None
+  +create(loss_config) EvaluationLossManager
+  +create_loss(config) BaseEvaluationLoss
+  -_normalize_name(value) str
+}
+
+class LogLoss {
+  +name
+  +kwargs
+  +compute(model, X, y_true) float
+}
+
+class MSELoss {
+  +name
+  +kwargs
+  +compute(model, X, y_true) float
+}
+
+class ModelLoss {
+  +name
+  +compute(model, X, y_true) float
+}
+
+BaseMetric <|-- AccuracyMetric
+BaseMetric <|-- F1Metric
+BaseMetric <|-- PrecisionMetric
+BaseMetric <|-- RecallMetric
+BaseMetric <|-- AUCMetric
+BaseMetric <|-- ConfusionMatrixMetric
+BaseMetric <|-- ClassificationReportMetric
+MetricsManager o-- BaseMetric : metrics
+MetricFactory ..> MetricsManager : creates
+MetricFactory ..> BaseMetric : creates
+
+BaseEvaluationLoss <|-- LogLoss
+BaseEvaluationLoss <|-- MSELoss
+BaseEvaluationLoss <|-- ModelLoss
+EvaluationLossManager o-- BaseEvaluationLoss : loss
+EvaluationLossFactory ..> EvaluationLossManager : creates
+EvaluationLossFactory ..> BaseEvaluationLoss : creates

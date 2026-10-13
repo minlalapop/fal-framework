@@ -28,6 +28,20 @@ def split_indices(indices: list[int], num_parts: int) -> list[list[int]]:
     return [indices[index::num_parts] for index in range(num_parts)]
 
 
+def split_contiguous_indices(indices: list[int], num_parts: int) -> list[list[int]]:
+    """Split ordered indices into balanced, contiguous parts."""
+    part_size, remainder = divmod(len(indices), num_parts)
+    parts = []
+    start = 0
+
+    for part_index in range(num_parts):
+        stop = start + part_size + (1 if part_index < remainder else 0)
+        parts.append(indices[start:stop])
+        start = stop
+
+    return parts
+
+
 def shuffle(values: list[Any], random_state: int | None) -> None:
     rng = random.Random(random_state)
     rng.shuffle(values)

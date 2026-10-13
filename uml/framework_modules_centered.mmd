@@ -1,0 +1,50 @@
+flowchart TB
+  CORE["<b>Core Orchestration</b><br/>FAL<br/>FALConfig<br/>CoreBuilder<br/>Experiment<br/>FALResult"]
+
+  subgraph INPUTS["Input And Construction"]
+    direction LR
+    DATA["<b>Data Layer</b><br/>Dataset loaders<br/>DatasetManager<br/>IID and Non-IID splitters"]
+    MODEL["<b>Model Layer</b><br/>BaseModel adapters<br/>PyTorch and sklearn"]
+  end
+
+  subgraph LEARNING["Learning And Robustness"]
+    direction LR
+    TRAINERS["<b>Trainer Layer</b><br/>Clean<br/>Attack-only<br/>Adversarial<br/>Mixed"]
+    ATTACKS["<b>Attack Layer</b><br/>FGSM<br/>PGD<br/>DeepFool<br/>ART backend"]
+  end
+
+  subgraph RUNTIME["Runtime And Evaluation"]
+    direction LR
+    EVAL["<b>Evaluation Layer</b><br/>EvaluationResult<br/>Metrics and losses"]
+    FL["<b>Federated Layer</b><br/>FLSystem<br/>Strategies<br/>Flower backend"]
+  end
+
+  DATA --> CORE
+  MODEL --> CORE
+  CORE --> TRAINERS
+  CORE --> ATTACKS
+  CORE --> EVAL
+  CORE --> FL
+
+  ATTACKS --> TRAINERS
+  TRAINERS --> EVAL
+  TRAINERS --> FL
+  FL --> CORE
+
+  classDef core fill:#F1ECFF,stroke:#6D5BD0,stroke-width:2px,color:#2D2358;
+  classDef data fill:#EAF0FF,stroke:#4F7DD9,stroke-width:1.4px,color:#22345F;
+  classDef model fill:#F7EDFF,stroke:#9A6BE8,stroke-width:1.4px,color:#35215A;
+  classDef train fill:#FFEAF3,stroke:#D64F8B,stroke-width:1.4px,color:#5A2138;
+  classDef attack fill:#FDEBFF,stroke:#B15BD0,stroke-width:1.4px,color:#4A235A;
+  classDef eval fill:#EEF2FF,stroke:#6A7FE8,stroke-width:1.4px,color:#27305F;
+  classDef fl fill:#E7F4FF,stroke:#3B8FD9,stroke-width:1.4px,color:#1E3A5F;
+  classDef group fill:#FFFFFF,stroke:#D9D4F0,stroke-width:1px,color:#4B4663;
+
+  class CORE core;
+  class DATA data;
+  class MODEL model;
+  class TRAINERS train;
+  class ATTACKS attack;
+  class EVAL eval;
+  class FL fl;
+  class INPUTS,LEARNING,RUNTIME group;

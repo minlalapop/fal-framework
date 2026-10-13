@@ -23,3 +23,24 @@ def test_model_adapter_factory_wraps_sklearn_like_estimators():
     assert model.framework == "sklearn"
     assert estimator.was_fit is True
     assert model.predict([[3], [4]]) == [0, 0]
+
+
+def test_pytorch_adapter_predicts_in_batches():
+    import torch
+    from torch import nn
+
+    raw_model = nn.Linear(3, 2)
+    model = ModelAdapterFactory.create(
+        raw_model,
+        {
+            "criterion": nn.CrossEntropyLoss(),
+            "optimizer": torch.optim.SGD(raw_model.parameters(), lr=0.01),
+            "batch_size": 2,
+            "predict_batch_size": 2,
+            "device": "cpu",
+        },
+    )
+
+    predictions = model.predict(torch.zeros(5, 3))
+
+    assert predictions.shape == (5,)

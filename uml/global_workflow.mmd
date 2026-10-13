@@ -1,0 +1,49 @@
+flowchart TB
+  USER["User API\nFAL(...).run()"]
+
+  subgraph SETUP["1. Build the experiment"]
+    CONFIG["FALConfig\nvalidate setup"]
+    BUILDER["CoreBuilder\ncreate components"]
+    COMPONENTS["Dataset + model + attack + trainer + metrics"]
+  end
+
+  subgraph ROUND["2. Federated training loop"]
+    CLIENTS["Client partitions\none model clone per client"]
+    LOCAL["Local client update\ntrain / attack / evaluate"]
+    SERVER["Server aggregation\nFedAvg / FedProx / FedAdam"]
+  end
+
+  subgraph OUTPUT["3. Framework result"]
+    RESULT["FALResult\nfinal model + round history"]
+    METRICS["Metrics\nloss / accuracy / f1 / reports"]
+    FILES["results/results_n\nmodel.pkl + CSV files"]
+  end
+
+  USER --> CONFIG
+  CONFIG --> BUILDER
+  BUILDER --> COMPONENTS
+  COMPONENTS --> CLIENTS
+  CLIENTS --> LOCAL
+  LOCAL --> SERVER
+  SERVER --> CLIENTS
+  SERVER --> RESULT
+  LOCAL --> METRICS
+  RESULT --> FILES
+  METRICS --> FILES
+  RESULT --> USER
+
+  EXT["Extensible design\nnew loaders, attacks, trainers,\nmetrics, strategies, FL backends"]
+  EXT -. registry / interface .-> COMPONENTS
+  EXT -. backend adapter .-> SERVER
+
+  classDef api fill:#111827,stroke:#111827,color:#F9FAFB,stroke-width:2px;
+  classDef setup fill:#DBEAFE,stroke:#2563EB,color:#0F172A,stroke-width:1.5px;
+  classDef loop fill:#ECFDF5,stroke:#059669,color:#0F172A,stroke-width:1.5px;
+  classDef output fill:#FCE7F3,stroke:#DB2777,color:#0F172A,stroke-width:1.5px;
+  classDef extension fill:#F8FAFC,stroke:#64748B,color:#0F172A,stroke-dasharray:4 3;
+
+  class USER api;
+  class CONFIG,BUILDER,COMPONENTS setup;
+  class CLIENTS,LOCAL,SERVER loop;
+  class RESULT,METRICS,FILES output;
+  class EXT extension;

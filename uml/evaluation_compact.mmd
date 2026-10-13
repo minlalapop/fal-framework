@@ -1,0 +1,84 @@
+classDiagram
+direction TB
+
+class EvaluationResult {
+  <<Evaluation_Result>>
+  +loss: float | None
+  +metrics: dict
+  +as_dict() dict
+}
+
+class MetricsManager {
+  <<Metrics_Manager>>
+  +metrics
+  +compute_all(y_true, y_pred) dict
+}
+
+class MetricFactory {
+  <<Metrics_Factory>>
+  +REGISTRY
+  +create(metrics_config) MetricsManager
+  +create_metric(config) BaseMetric
+  +available() tuple
+}
+
+class BaseMetric {
+  <<Metric_Interface>>
+  +name
+  +compute(y_true, y_pred) Any
+}
+
+class ClassificationMetrics {
+  <<Concrete_Metrics>>
+  AccuracyMetric
+  F1Metric
+  PrecisionMetric
+  RecallMetric
+  AUCMetric
+}
+
+class DetailedMetrics {
+  <<Concrete_Metrics>>
+  ConfusionMatrixMetric
+  ClassificationReportMetric
+}
+
+class EvaluationLossManager {
+  <<Loss_Manager>>
+  +loss
+  +compute(model, X, y_true) float_or_None
+}
+
+class EvaluationLossFactory {
+  <<Loss_Factory>>
+  +create(loss_config) EvaluationLossManager
+  +create_loss(config) BaseEvaluationLoss
+}
+
+class BaseEvaluationLoss {
+  <<Loss_Interface>>
+  +name
+  +compute(model, X, y_true) float
+}
+
+class EvaluationLosses {
+  <<Concrete_Losses>>
+  LogLoss
+  MSELoss
+  ModelLoss
+}
+
+MetricsManager --> EvaluationResult : fills metrics
+EvaluationLossManager --> EvaluationResult : fills loss
+
+MetricFactory --> MetricsManager : builds
+MetricsManager o-- BaseMetric : list of metrics
+BaseMetric <|.. ClassificationMetrics
+BaseMetric <|.. DetailedMetrics
+
+EvaluationLossFactory --> EvaluationLossManager : builds
+EvaluationLossManager o-- BaseEvaluationLoss : optional loss
+BaseEvaluationLoss <|.. EvaluationLosses
+
+note for EvaluationResult "Real class in fal/evaluation/result.py.\nTrainers return EvaluationResult(loss, metrics)."
+note for ClassificationMetrics "Grouped for readability.\nConcrete classes are in evaluation_metrics_losses.mmd."

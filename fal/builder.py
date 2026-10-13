@@ -69,7 +69,7 @@ class CoreBuilder:
         if isinstance(self.config.dataset, str) and self.config.dataset.lower().endswith(".csv"):
             return CustomCSVDatasetLoader(self.config.dataset, self.config.target)
 
-        return BuiltinDatasetLoader(self.config.dataset)
+        return BuiltinDatasetLoader(self.config.dataset, **self.config.dataset_params)
 
     def _build_client_splitter(self):
         if self.config.iid:

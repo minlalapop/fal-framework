@@ -3,7 +3,6 @@ from torch import nn
 
 from fal import FAL
 
-
 class SimpleMLP(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -33,12 +32,10 @@ fal = FAL(
     trainer_type="mixed",
     attack_type="fgsm",
     attack_params={"eps": 0.3},
-    metrics=["accuracy", "f1","precision","recall", "confusion_matrix", "classification_report"],
+    metrics=["accuracy", "f1", "confusion_matrix"],
     loss="model_loss",
     num_clients=3,
     num_rounds=5,
-    fl_algorithm="fedprox",
-    fl_params={"proximal_mu": 0.1},
-    random_state=42,
+    fl_algorithm="fedavg",
 )
 result = fal.run()

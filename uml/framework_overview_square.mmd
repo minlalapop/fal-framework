@@ -1,0 +1,59 @@
+flowchart TB
+  API["FAL.run()\npublic entry point"]
+  CONFIG["FALConfig\nvalidates experiment settings"]
+  BUILDER["CoreBuilder\ncreates all components"]
+
+  subgraph PREP["1. Data + Model Preparation"]
+    DATA["DatasetManager\nload data + split clients"]
+    MODEL["ModelAdapterFactory\nPyTorch / sklearn adapters"]
+  end
+
+  subgraph TRAIN["2. Training Setup"]
+    TRAINER["TrainerFactory\nclean / attack / adversarial / mixed"]
+    ATTACK["AttackFactory + ARTBackend\nFGSM / PGD / DeepFool"]
+  end
+
+  subgraph EVALUATE["3. Evaluation"]
+    METRICS["MetricsManager"]
+    LOSS["EvaluationLossManager"]
+    EVALRESULT["EvaluationResult\nloss + metrics"]
+  end
+
+  subgraph FED["4. Federated Learning"]
+    FL["FLSystem"]
+    STRATEGY["StrategyAdapter\nFedAvg / FedProx / FedAdam"]
+    FLOWER["FlowerBackend\nFlower clients + server"]
+  end
+
+  RESULT["5. FALResult\nhistory + final metrics + artifacts"]
+
+  API --> CONFIG --> BUILDER
+  BUILDER --> PREP
+  PREP --> TRAIN
+  TRAIN --> EVALUATE
+  TRAIN --> FED
+  EVALUATE --> FED
+  FED --> RESULT
+
+  DATA -. provides client data .-> FLOWER
+  MODEL -. wrapped model .-> TRAINER
+  ATTACK -. optional attacks .-> TRAINER
+  TRAINER -. local fit/evaluate .-> FLOWER
+  METRICS --> EVALRESULT
+  LOSS --> EVALRESULT
+  FL --> STRATEGY
+  FL --> FLOWER
+
+  classDef core fill:#EAF2F8,stroke:#2F5D8C,stroke-width:1.5px,color:#102A43;
+  classDef prep fill:#E8F5E9,stroke:#2E7D32,stroke-width:1.3px,color:#102A43;
+  classDef train fill:#FCE8EC,stroke:#B83280,stroke-width:1.3px,color:#102A43;
+  classDef eval fill:#F3E8FF,stroke:#7E22CE,stroke-width:1.3px,color:#102A43;
+  classDef fl fill:#E8F4FD,stroke:#2563EB,stroke-width:1.3px,color:#102A43;
+  classDef result fill:#F8FAFC,stroke:#475569,stroke-width:1.5px,color:#102A43;
+
+  class API,CONFIG,BUILDER core;
+  class DATA,MODEL prep;
+  class TRAINER,ATTACK train;
+  class METRICS,LOSS,EVALRESULT eval;
+  class FL,STRATEGY,FLOWER fl;
+  class RESULT result;

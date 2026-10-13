@@ -1,0 +1,77 @@
+classDiagram
+direction TB
+
+class AttackBackend {
+  <<abstract>>
+  +generate(attack_name, model, X, y, params) Any
+}
+
+class AttackBackendFactory {
+  -_registry
+  +register(name, backend_cls) None
+  +create(backend_name, backend_params) AttackBackend
+  -_normalize_name(value) str
+}
+
+class BaseAttack {
+  <<abstract>>
+  +backend
+  +params
+  +generate(model, X, y) Any
+}
+
+class AttackFactory {
+  -_registry
+  +register(name, attack_cls) None
+  +create(attack_type, attack_params, backend) BaseAttack
+  -_normalize_name(value) str
+}
+
+class FGSM {
+  +generate(model, X, y) Any
+}
+
+class PGD {
+  +generate(model, X, y) Any
+}
+
+class DeepFool {
+  +generate(model, X, y) Any
+}
+
+class ARTModelAdapter {
+  <<abstract>>
+  +create_estimator(model, config, X, y) Any
+}
+
+class ARTBackend {
+  +FastGradientMethod
+  +ProjectedGradientDescent
+  +DeepFool
+  +art_model_adapter
+  +estimator_config
+  +generate(attack_name, model, X, y, params) Any
+  +build_estimator(model, X, y) Any
+}
+
+class PyTorchARTAdapter {
+  +classifier_cls
+  +create_estimator(model, config, X, y) Any
+  -_complete_config(model, config, X, y) dict
+}
+
+class SklearnARTAdapter {
+  +classifier_cls
+  +create_estimator(model, config, X, y) Any
+}
+
+AttackBackend <|-- ARTBackend
+BaseAttack <|-- FGSM
+BaseAttack <|-- PGD
+BaseAttack <|-- DeepFool
+ARTModelAdapter <|-- PyTorchARTAdapter
+ARTModelAdapter <|-- SklearnARTAdapter
+BaseAttack o-- AttackBackend : backend
+ARTBackend o-- ARTModelAdapter : art_model_adapter
+AttackBackendFactory ..> AttackBackend : creates
+AttackFactory ..> BaseAttack : creates

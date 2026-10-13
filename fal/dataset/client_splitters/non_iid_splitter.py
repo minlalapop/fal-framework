@@ -10,7 +10,7 @@ from fal.dataset.client_splitters.splitter_utils import (
     item,
     num_samples,
     shuffle,
-    split_indices,
+    split_contiguous_indices,
     take,
     validate_num_clients,
 )
@@ -46,7 +46,11 @@ class NonIIDSplitter(ClientSplitter):
             ordered_indices.extend(label_indices)
 
         num_shards = max(num_clients * self.shards_per_client, num_clients)
-        shards = [shard for shard in split_indices(ordered_indices, num_shards) if shard]
+        shards = [
+            shard
+            for shard in split_contiguous_indices(ordered_indices, num_shards)
+            if shard
+        ]
 
         if self.shuffle:
             shuffle(shards, self.random_state)

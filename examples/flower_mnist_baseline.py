@@ -1,14 +1,3 @@
-"""Pure Flower MNIST baseline.
-
-This script intentionally does not import ``fal``. It mirrors the current
-FAL MNIST setup with Flower, PyTorch, sklearn metrics, and ART FGSM.
-
-Run one mode at a time:
-
-    FLOWER_BASELINE_TRAINER=clean PYTHONPATH=. python examples/flower_mnist_baseline.py
-    FLOWER_BASELINE_TRAINER=attack_only PYTHONPATH=. python examples/flower_mnist_baseline.py
-    FLOWER_BASELINE_TRAINER=adversarial PYTHONPATH=. python examples/flower_mnist_baseline.py
-"""
 
 from __future__ import annotations
 

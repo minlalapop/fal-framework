@@ -1,0 +1,60 @@
+classDiagram
+direction TB
+
+class BaseModel {
+  <<abstract>>
+  +framework
+  +fit(X, y, params) BaseModel
+  +predict(X) Any
+  +get_raw_model() Any
+}
+
+class ModelAdapterFactory {
+  -_registry
+  +register(name, adapter_cls) None
+  +create(model, model_params) BaseModel
+  -_detect_model_type(model) str
+  -_normalize_name(value) str
+}
+
+class SklearnModelAdapter {
+  +model
+  +framework
+  +fit(X, y, params) SklearnModelAdapter
+  +predict(X) Any
+  +get_raw_model() Any
+  -_validate_model() None
+  -_partial_fit_kwargs(params) dict
+  -_prepare_warm_start_model(params) None
+}
+
+class PyTorchModelAdapter {
+  +model
+  +criterion
+  +optimizer
+  +epochs
+  +batch_size
+  +predict_batch_size
+  +device
+  -_torch
+  +framework
+  +fit(X, y, params) PyTorchModelAdapter
+  +predict(X) Any
+  +get_raw_model() Any
+  +clone() PyTorchModelAdapter
+  -_validate_model() None
+  -_configure_device() None
+  -_validate_training_params() None
+  -_make_tensor_dataset(X, y) Any
+  -_snapshot_parameters() list
+  -_add_proximal_term(loss, global_params, proximal_mu) Any
+  -_to_tensor(values) Any
+  -_to_target_tensor(values) Any
+  -_clone_optimizer(cloned_model) Any
+}
+
+BaseModel <|-- SklearnModelAdapter
+BaseModel <|-- PyTorchModelAdapter
+ModelAdapterFactory ..> BaseModel : creates
+ModelAdapterFactory ..> SklearnModelAdapter
+ModelAdapterFactory ..> PyTorchModelAdapter
