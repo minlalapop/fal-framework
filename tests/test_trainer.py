@@ -98,6 +98,26 @@ def test_adversarial_trainer_trains_on_clean_and_adversarial_mix():
     assert params == {"epochs": 1}
 
 
+def test_adversarial_trainer_records_attack_generation_times(monkeypatch):
+    ticks = iter([10.0, 10.25, 20.0, 20.5])
+    monkeypatch.setattr(
+        "fal.trainers.adversarial.time.perf_counter",
+        lambda: next(ticks),
+    )
+    trainer = AdversarialTrainer(
+        model=FakeModel(),
+        attack=FakeAttack(),
+        metrics_manager=FakeMetricsManager(),
+        loss_manager=FakeLossManager(),
+    )
+
+    trainer.train((np.array([[1], [2]]), np.array([0, 1])))
+    trainer.evaluate((np.array([[1], [2]]), np.array([0, 1])))
+
+    assert trainer.last_attack_generation_train_time == 0.25
+    assert trainer.last_attack_generation_evaluation_time == 0.5
+
+
 def test_mixed_trainer_prefixes_clean_attack_and_trained_metrics():
     trainer = MixedTrainer(
         model=FakeModel(),

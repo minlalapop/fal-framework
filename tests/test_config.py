@@ -1,6 +1,10 @@
+import random
+
+import numpy as np
 import pytest
 from sklearn.linear_model import LogisticRegression
 
+from fal import seed_everything
 from fal.config import FALConfig
 
 
@@ -50,3 +54,37 @@ def test_non_iid_shards_per_client_must_be_positive():
 
     with pytest.raises(ValueError, match="shards_per_client"):
         config.validate()
+
+
+def test_config_accepts_deterministic_seed_control():
+    config = FALConfig(
+        dataset="iris",
+        model=LogisticRegression(),
+        random_state=42,
+        deterministic=True,
+    )
+
+    config.validate()
+
+    assert config.random_state == 42
+    assert config.deterministic is True
+
+
+def test_config_rejects_non_boolean_deterministic_option():
+    config = FALConfig(
+        dataset="iris",
+        model=LogisticRegression(),
+        deterministic="yes",
+    )
+
+    with pytest.raises(ValueError, match="deterministic"):
+        config.validate()
+
+
+def test_public_seed_helper_controls_python_and_numpy_rngs():
+    seed_everything(42)
+    first = (random.random(), np.random.random())
+    seed_everything(42)
+    second = (random.random(), np.random.random())
+
+    assert first == second

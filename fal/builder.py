@@ -167,6 +167,8 @@ class CoreBuilder:
             "model": type(self.config.model).__name__,
             "metrics": [self._metric_name(metric) for metric in self.config.metrics],
             "loss": self._loss_name(),
+            "random_state": self.config.random_state,
+            "deterministic": self.config.deterministic,
         }
 
     def _build_attack_display_config(self):

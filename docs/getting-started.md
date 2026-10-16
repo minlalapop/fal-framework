@@ -23,6 +23,44 @@ result = fal.run()
 print(result.latest_metrics)
 ```
 
+For best-effort reproducibility across Python, NumPy, PyTorch, and federated
+clients, provide a base seed and enable deterministic PyTorch operations:
+
+```python
+fal = FAL(
+    dataset="wine",
+    model=LogisticRegression(max_iter=1000, random_state=42),
+    random_state=42,
+    deterministic=True,
+)
+```
+
+Client seeds are derived from the base seed, client identifier, federated
+round, and execution phase. Exact bitwise reproducibility can still depend on
+the hardware and third-party operations. Because a model object is constructed
+before it is passed to `FAL`, seed its initialization before constructing it:
+
+```python
+from fal import seed_everything
+
+seed_everything(42, deterministic=True)
+model = MyPyTorchModel()
+```
+
+After a run, timing data are available separately from model metrics and are
+also saved to `timings.json`:
+
+```python
+result = fal.run()
+print(result.timings["total_execution_time"])
+print(result.timings["rounds"])
+print(result.timings["clients"])
+```
+
+If no evaluation loss is configured, `result.losses` is empty and
+`result.loss_available` is `False`; no artificial zero is written to the
+metrics CSV.
+
 Using arrays directly:
 
 ```python

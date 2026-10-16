@@ -1,4 +1,5 @@
 from typing import Any
+import time
 
 from fal.evaluation import EvaluationResult
 
@@ -23,11 +24,13 @@ class AttackOnlyTrainer(BaseTrainer):
 
         X_test, y_test = data
 
+        attack_started_at = time.perf_counter()
         X_adv = self.attack.generate(
             model=self.model,
             X=X_test,
             y=y_test,
         )
+        self.last_attack_generation_evaluation_time = time.perf_counter() - attack_started_at
 
         y_pred = self.model.predict(X_adv)
         metrics = self.metrics_manager.compute_all(y_test, y_pred)

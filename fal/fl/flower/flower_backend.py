@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -38,11 +39,14 @@ class FlowerBackend(FLBackend):
         verbose: int = 1,
         run_config: dict[str, Any] | None = None,
     ) -> Any:
+        run_config = run_config or {}
         clients = self.client_factory.create_clients(
             model=model,
             trainer=trainer,
             clients_data=clients_data,
             test_data=test_data,
+            random_state=run_config.get("random_state"),
+            deterministic=bool(run_config.get("deterministic", False)),
         )
 
         server_result = self.server.start_server(
@@ -60,10 +64,11 @@ class FlowerBackend(FLBackend):
         return FALResult(
             model=model,
             history=history,
-            losses=list(getattr(history, "losses_distributed", [])),
+            losses=_available_losses(getattr(history, "losses_distributed", [])),
             metrics=metrics,
             backend="flower",
             raw_result=history,
+            timings=server_result.timings,
         )
 
     def _apply_final_parameters(
@@ -86,3 +91,12 @@ class FlowerBackend(FLBackend):
 
         labels = [np.asarray(y) for _, y in clients_data]
         return np.unique(np.concatenate(labels))
+
+
+def _available_losses(losses: Any) -> list[tuple[int, float]]:
+    """Remove Flower's NaN marker for evaluations without a configured loss."""
+    return [
+        (int(round_number), float(loss))
+        for round_number, loss in losses
+        if not math.isnan(float(loss))
+    ]

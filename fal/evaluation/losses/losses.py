@@ -67,13 +67,23 @@ def _compute_pytorch_model_loss(model: Any, X: Any, y_true: Any, criterion: Any)
         X_tensor = X_tensor.float()
 
     y_tensor = torch.as_tensor(_writable_array(y_true)).long()
-    if device is not None:
-        X_tensor = X_tensor.to(device)
-        y_tensor = y_tensor.to(device)
+    batch_size = int(
+        getattr(model, "predict_batch_size", getattr(model, "batch_size", 32))
+    )
+    if batch_size <= 0:
+        raise ValueError("ModelLoss requires a positive evaluation batch size.")
 
     raw_model.eval()
     with torch.no_grad():
-        outputs = raw_model(X_tensor)
+        output_batches = [
+            raw_model(X_tensor[start:start + batch_size].to(device))
+            for start in range(0, len(X_tensor), batch_size)
+        ]
+        if not output_batches:
+            raise ValueError("ModelLoss cannot be computed on an empty dataset.")
+        outputs = torch.cat(output_batches, dim=0)
+        if device is not None:
+            y_tensor = y_tensor.to(device)
         loss = criterion(outputs, y_tensor)
 
     return float(loss.detach().cpu().item())

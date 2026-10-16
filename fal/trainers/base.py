@@ -18,6 +18,8 @@ class BaseTrainer(ABC):
         self.metrics_manager = metrics_manager
         self.loss_manager = loss_manager
         self.trainer_params = trainer_params or {}
+        self.last_attack_generation_train_time = 0.0
+        self.last_attack_generation_evaluation_time = 0.0
 
     @abstractmethod
     def train(self, data: tuple[Any, Any]) -> Any:

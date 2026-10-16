@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import pickle
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,7 +22,15 @@ class FALResult:
     metrics: dict[str, list[tuple[int, Any]]] = field(default_factory=dict)
     backend: str | None = None
     raw_result: Any = None
+    timings: dict[str, Any] = field(default_factory=dict)
     artifact_paths: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.losses = [
+            (round_number, loss)
+            for round_number, loss in self.losses
+            if not _is_unavailable_loss(loss)
+        ]
 
     @property
     def raw_model(self) -> Any:
@@ -56,14 +65,37 @@ class FALResult:
             _write_detailed_metrics_csv(detailed_path, detailed_metrics)
             paths["detailed_metrics"] = str(detailed_path)
 
+        if self.timings:
+            timings_path = output_dir / "timings.json"
+            self.save_timings(str(timings_path))
+            paths["timings"] = str(timings_path)
+
         self.artifact_paths = paths
         return paths
+
+    def save_timings(self, path: str) -> None:
+        """Write timing telemetry to a JSON file."""
+        timings_path = Path(path)
+        timings_path.parent.mkdir(parents=True, exist_ok=True)
+        with timings_path.open("w", encoding="utf-8") as file:
+            json.dump(_to_jsonable(self.timings), file, indent=2, ensure_ascii=False)
+
+    def refresh_timings_output(self) -> None:
+        """Refresh the timing artifact after the full public run completes."""
+        timings_path = self.artifact_paths.get("timings")
+        if timings_path:
+            self.save_timings(timings_path)
 
     @property
     def latest_loss(self) -> float | None:
         if not self.losses:
             return None
         return self.losses[-1][1]
+
+    @property
+    def loss_available(self) -> bool:
+        """Whether at least one real evaluation loss was recorded."""
+        return bool(self.losses)
 
     @property
     def latest_metrics(self) -> dict[str, Any]:
@@ -145,7 +177,7 @@ def _split_metrics(
 
 
 def _clear_known_outputs(output_dir: Path) -> None:
-    for filename in ("model.pkl", "metrics.csv", "detailed_metrics.csv"):
+    for filename in ("model.pkl", "metrics.csv", "detailed_metrics.csv", "timings.json"):
         path = output_dir / filename
         if path.is_file():
             path.unlink()
@@ -258,6 +290,10 @@ def _round_numbers(
 
 def _is_scalar(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_unavailable_loss(value: Any) -> bool:
+    return isinstance(value, float) and math.isnan(value)
 
 
 def _format_run_table(

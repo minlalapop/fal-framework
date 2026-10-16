@@ -30,22 +30,60 @@ class FlowerClientFactory:
         trainer: Any,
         clients_data: list[tuple[Any, Any]],
         test_data: tuple[Any, Any] | None = None,
+        random_state: int | None = None,
+        deterministic: bool = False,
     ) -> list[FlowerClientAdapter]:
         client_cls = self._get_client_class()
         classes = self._get_global_classes(clients_data)
         return [
-            client_cls(
+            self._create_client(
+                client_cls=client_cls,
                 model=client_model,
-                trainer=self._clone_trainer(trainer, client_model, classes),
-                parameter_adapter=self._create_parameter_adapter(client_model, data, classes),
+                trainer=trainer,
                 data=data,
                 test_data=test_data,
+                classes=classes,
+                client_id=client_id,
+                random_state=random_state,
+                deterministic=deterministic,
             )
-            for client_model, data in (
-                (self._clone_model(model), client_data)
-                for client_data in clients_data
+            for client_id, client_model, data in (
+                (client_id, self._clone_model(model), client_data)
+                for client_id, client_data in enumerate(clients_data)
             )
         ]
+
+    def _create_client(
+        self,
+        client_cls: type[FlowerClientAdapter],
+        model: Any,
+        trainer: Any,
+        data: tuple[Any, Any],
+        test_data: tuple[Any, Any] | None,
+        classes: Any,
+        client_id: int,
+        random_state: int | None,
+        deterministic: bool,
+    ) -> FlowerClientAdapter:
+        # Construct with the historical signature so registered custom client
+        # adapters remain compatible, then attach the optional runtime controls.
+        client = client_cls(
+            model=model,
+            trainer=self._clone_trainer(trainer, model, classes),
+            parameter_adapter=self._create_parameter_adapter(model, data, classes),
+            data=data,
+            test_data=test_data,
+        )
+        for name, value in (
+            ("client_id", client_id),
+            ("random_state", random_state),
+            ("deterministic", deterministic),
+        ):
+            try:
+                setattr(client, name, value)
+            except AttributeError:
+                pass
+        return client
 
     def _clone_model(self, model: Any) -> Any:
         if callable(getattr(model, "clone", None)):

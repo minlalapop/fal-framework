@@ -1,4 +1,5 @@
 from typing import Any
+import time
 
 import numpy as np
 
@@ -15,11 +16,13 @@ class AdversarialTrainer(BaseTrainer):
             raise ValueError("AdversarialTrainer requires an attack.")
 
         X_train, y_train = data
+        attack_started_at = time.perf_counter()
         X_adv = self.attack.generate(
             model=self.model,
             X=X_train,
             y=y_train,
         )
+        self.last_attack_generation_train_time = time.perf_counter() - attack_started_at
         X_mix, y_mix = _mix_clean_and_adversarial(X_train, y_train, X_adv, y_train)
         return self.model.fit(X_mix, y_mix, **self.trainer_params)
 
@@ -28,11 +31,13 @@ class AdversarialTrainer(BaseTrainer):
             raise ValueError("AdversarialTrainer requires an attack.")
 
         X_test, y_test = data
+        attack_started_at = time.perf_counter()
         X_adv = self.attack.generate(
             model=self.model,
             X=X_test,
             y=y_test,
         )
+        self.last_attack_generation_evaluation_time = time.perf_counter() - attack_started_at
         X_mix, y_mix = _mix_clean_and_adversarial(X_test, y_test, X_adv, y_test)
 
         y_pred = self.model.predict(X_mix)

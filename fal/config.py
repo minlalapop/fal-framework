@@ -56,6 +56,7 @@ class FALConfig:
     iid: bool = True
     shards_per_client: int = 2
     random_state: int | None = None
+    deterministic: bool = False
     shuffle: bool = True
 
     fl_backend: str = "flower"
@@ -191,6 +192,12 @@ class FALConfig:
     def _validate_runtime(self) -> None:
         if not isinstance(self.verbose, int) or self.verbose < 0:
             raise ValueError("`verbose` must be a non-negative integer.")
+        if self.random_state is not None and (
+            not isinstance(self.random_state, int) or isinstance(self.random_state, bool)
+        ):
+            raise ValueError("`random_state` must be an integer or None.")
+        if not isinstance(self.deterministic, bool):
+            raise ValueError("`deterministic` must be a boolean.")
 
 
 def _normalize_optional_name(value: str | None) -> str | None:

@@ -57,12 +57,20 @@ class MixedTrainer(BaseTrainer):
             raise ValueError("MixedTrainer requires an attack.")
 
         self.clean_trainer.train(data)
-        return self.adversarial_trainer.train(data)
+        result = self.adversarial_trainer.train(data)
+        self.last_attack_generation_train_time = (
+            self.adversarial_trainer.last_attack_generation_train_time
+        )
+        return result
 
     def evaluate(self, data: tuple[Any, Any]) -> EvaluationResult:
         clean_result = self.clean_trainer.evaluate(data)
         attack_result = self.attack_trainer.evaluate(data)
         trained_result = self.adversarial_trainer.evaluate(data)
+        self.last_attack_generation_evaluation_time = (
+            self.attack_trainer.last_attack_generation_evaluation_time
+            + self.adversarial_trainer.last_attack_generation_evaluation_time
+        )
 
         metrics = {}
         metrics.update(_prefix_metrics("clean", clean_result.metrics))
