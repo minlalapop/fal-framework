@@ -15,6 +15,7 @@ from fal.fl.flower.flower_client.flower_parameters.flower_parameter_factory impo
 from fal.fl.flower.metric_codec import decode_metric_history
 from fal.fl.flower.flower_server.flower_server_adapter import FlowerServerAdapter
 from fal.result import FALResult
+from fal.trainers.mixed import MixedTrainer
 
 
 class FlowerBackend(FLBackend):
@@ -57,7 +58,12 @@ class FlowerBackend(FLBackend):
             run_config=run_config,
         )
 
-        self._apply_final_parameters(model, server_result.final_parameters, clients_data)
+        self._apply_final_parameters(
+            model,
+            server_result.final_parameters,
+            clients_data,
+            trainer=trainer,
+        )
         history = server_result.history
         metrics = decode_metric_history(dict(getattr(history, "metrics_distributed", {})))
 
@@ -76,6 +82,7 @@ class FlowerBackend(FLBackend):
         model: Any,
         final_parameters: list[Any] | None,
         clients_data: list,
+        trainer: Any = None,
     ) -> None:
         if final_parameters is None:
             return
@@ -83,6 +90,9 @@ class FlowerBackend(FLBackend):
         data = clients_data[0] if clients_data else None
         classes = self._get_global_classes(clients_data)
         parameter_adapter = ParameterAdapterFactory.create(model, data=data, classes=classes)
+        if isinstance(trainer, MixedTrainer):
+            parameter_count = len(parameter_adapter.get_parameters(model))
+            final_parameters = final_parameters[parameter_count:]
         parameter_adapter.set_parameters(model, final_parameters)
 
     def _get_global_classes(self, clients_data: list[tuple[Any, Any]]) -> Any:

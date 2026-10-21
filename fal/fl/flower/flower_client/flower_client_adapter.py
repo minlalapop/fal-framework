@@ -41,10 +41,23 @@ class FlowerClientAdapter:
         self.deterministic = deterministic
 
     def get_parameters(self, config: dict[str, Any] | None = None) -> list:
-        return self.parameter_adapter.get_parameters(self.model)
+        parameters = self.parameter_adapter.get_parameters(self.model)
+        secondary_model = getattr(self, "secondary_model", None)
+        secondary_adapter = getattr(self, "secondary_parameter_adapter", None)
+        if secondary_model is not None and secondary_adapter is not None:
+            parameters = parameters + secondary_adapter.get_parameters(secondary_model)
+        return parameters
 
     def set_parameters(self, params: list) -> None:
-        self.parameter_adapter.set_parameters(self.model, params)
+        secondary_model = getattr(self, "secondary_model", None)
+        secondary_adapter = getattr(self, "secondary_parameter_adapter", None)
+        if secondary_model is None or secondary_adapter is None:
+            self.parameter_adapter.set_parameters(self.model, params)
+            return
+
+        primary_count = len(self.parameter_adapter.get_parameters(self.model))
+        self.parameter_adapter.set_parameters(self.model, params[:primary_count])
+        secondary_adapter.set_parameters(secondary_model, params[primary_count:])
 
     def fit(
         self,

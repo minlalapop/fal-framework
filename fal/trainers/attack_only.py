@@ -33,7 +33,10 @@ class AttackOnlyTrainer(BaseTrainer):
         self.last_attack_generation_evaluation_time = time.perf_counter() - attack_started_at
 
         y_pred = self.model.predict(X_adv)
-        metrics = self.metrics_manager.compute_all(y_test, y_pred)
+        metrics = {
+            f"attack_{name}": value
+            for name, value in self.metrics_manager.compute_all(y_test, y_pred).items()
+        }
         loss = self.loss_manager.compute(self.model, X_adv, y_test) if self.loss_manager else None
 
         return EvaluationResult(loss=loss, metrics=metrics)

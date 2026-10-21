@@ -62,6 +62,21 @@ def test_real_loss_is_preserved_for_flower():
     assert loss == 0.625
 
 
+def test_client_transports_two_independent_parameter_sets_for_mixed():
+    client = _client()
+    secondary_model = type("Model", (), {})()
+    secondary_adapter = FakeParameterAdapter()
+    client.secondary_model = secondary_model
+    client.secondary_parameter_adapter = secondary_adapter
+
+    assert client.get_parameters() == [1.0, 1.0]
+
+    client.set_parameters([2.0, 3.0])
+
+    assert client.model.parameters == [2.0]
+    assert secondary_model.parameters == [3.0]
+
+
 def test_flower_backend_removes_only_missing_loss_markers():
     losses = _available_losses([(1, math.nan), (2, 0.625)])
 
