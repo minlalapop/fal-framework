@@ -17,7 +17,13 @@ class AttackBackendFactory:
 
     @classmethod
     def register(cls, name: str, backend_cls: type[AttackBackend]) -> None:
+        if not isinstance(backend_cls, type) or not issubclass(backend_cls, AttackBackend):
+            raise TypeError("Registered attack backends must inherit from AttackBackend.")
         cls._registry[cls._normalize_name(name)] = backend_cls
+
+    @classmethod
+    def available(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls._registry))
 
     @classmethod
     def create(

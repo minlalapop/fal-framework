@@ -81,6 +81,33 @@ def test_config_rejects_non_boolean_deterministic_option():
         config.validate()
 
 
+def test_config_defaults_to_cpu_only_client_resources():
+    config = FALConfig(dataset="iris", model=LogisticRegression())
+
+    config.validate()
+
+    assert config.num_cpus == 1.0
+    assert config.num_gpus == 0.0
+    assert config.max_concurrent_clients is None
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"num_cpus": 0}, "num_cpus"),
+        ({"num_gpus": -0.5}, "num_gpus"),
+        ({"max_concurrent_clients": 0}, "max_concurrent_clients"),
+        ({"num_clients": 2, "max_concurrent_clients": 3}, "cannot exceed"),
+        ({"attack_backend_params": []}, "attack_backend_params"),
+    ],
+)
+def test_config_rejects_invalid_client_resources(kwargs, message):
+    config = FALConfig(dataset="iris", model=LogisticRegression(), **kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        config.validate()
+
+
 def test_public_seed_helper_controls_python_and_numpy_rngs():
     seed_everything(42)
     first = (random.random(), np.random.random())

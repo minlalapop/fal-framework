@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-from fal.adv.art.art_model_adapter import ARTModelAdapter
+from fal.adv.art.art_model_adapter import ARTModelAdapter, validate_clip_values
 
 
 class SklearnARTAdapter(ARTModelAdapter):
@@ -21,10 +21,11 @@ class SklearnARTAdapter(ARTModelAdapter):
         X: Any | None = None,
         y: Any | None = None,
     ) -> Any:
+        clip_values = validate_clip_values(config.get("clip_values"), X)
         try:
             return self.classifier_cls(
                 model=model.get_raw_model(),
-                clip_values=config.get("clip_values"),
+                clip_values=clip_values,
             )
         except Exception as exc:
             raise ValueError(

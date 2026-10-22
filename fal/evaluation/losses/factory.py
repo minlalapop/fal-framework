@@ -21,7 +21,13 @@ class EvaluationLossFactory:
 
     @classmethod
     def register(cls, name: str, loss_cls: type[BaseEvaluationLoss]) -> None:
+        if not isinstance(loss_cls, type) or not issubclass(loss_cls, BaseEvaluationLoss):
+            raise TypeError("Registered evaluation losses must inherit from BaseEvaluationLoss.")
         cls._registry[cls._normalize_name(name)] = loss_cls
+
+    @classmethod
+    def available(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls._registry))
 
     @classmethod
     def create(cls, loss_config: Any = None) -> EvaluationLossManager:

@@ -94,6 +94,9 @@ class FlowerBackend(FLBackend):
             parameter_count = len(parameter_adapter.get_parameters(model))
             final_parameters = final_parameters[parameter_count:]
         parameter_adapter.set_parameters(model, final_parameters)
+        configure_device = getattr(model, "configure_runtime_device", None)
+        if callable(configure_device):
+            configure_device()
 
     def _get_global_classes(self, clients_data: list[tuple[Any, Any]]) -> Any:
         if not clients_data:

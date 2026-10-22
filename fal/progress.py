@@ -29,6 +29,7 @@ class FALProgressReporter:
         self.round_started_at: dict[int, float] = {}
         self.fit_status: dict[int, str] = {}
         self.metric_names: list[str] = []
+        self.show_loss = False
         self.header_printed = False
 
     def start(
@@ -95,14 +96,16 @@ class FALProgressReporter:
 
         if not self.header_printed:
             self.metric_names = _ordered_metric_names(scalar_metrics)
-            self._write(_format_header(self.metric_names))
+            self.show_loss = loss is not None
+            self._write(_format_header(self.metric_names, include_loss=self.show_loss))
             self.header_printed = True
 
         row = _format_round(
             round_number=round_number,
             total_rounds=self.total_rounds,
             clients=self.fit_status.get(round_number, "-"),
-            loss=loss,
+            loss=loss if self.show_loss else None,
+            include_loss=self.show_loss,
             metric_names=self.metric_names,
             metrics=scalar_metrics,
             elapsed=elapsed,
@@ -232,9 +235,12 @@ def _display_name(value: Any) -> str:
     return known_names.get(text.lower(), text.replace("_", " ").title())
 
 
-def _format_header(metric_names: list[str]) -> str:
-    columns = ["round", "clients", "loss", *metric_names, "time"]
-    return _format_row(columns, _column_widths(metric_names))
+def _format_header(metric_names: list[str], include_loss: bool = True) -> str:
+    columns = ["round", "clients"]
+    if include_loss:
+        columns.append("loss")
+    columns.extend([*metric_names, "time"])
+    return _format_row(columns, _column_widths(metric_names, include_loss))
 
 
 def _format_round(
@@ -242,6 +248,7 @@ def _format_round(
     total_rounds: int,
     clients: str,
     loss: float | None,
+    include_loss: bool,
     metric_names: list[str],
     metrics: dict[str, Any],
     elapsed: float,
@@ -249,11 +256,12 @@ def _format_round(
     values = [
         f"{round_number}/{total_rounds}",
         clients,
-        "-" if loss is None else f"{loss:.4f}",
     ]
+    if include_loss:
+        values.append("-" if loss is None else f"{loss:.4f}")
     values.extend(_format_metric(metrics.get(name)) for name in metric_names)
     values.append(f"{elapsed:.1f}s")
-    return _format_row(values, _column_widths(metric_names))
+    return _format_row(values, _column_widths(metric_names, include_loss))
 
 
 def _format_row(values: list[str], widths: list[int]) -> str:
@@ -273,14 +281,13 @@ def _format_postfix(
     return " ".join(values)
 
 
-def _column_widths(metric_names: list[str]) -> list[int]:
-    return [
-        7,
-        7,
-        8,
-        *[max(8, len(name)) for name in metric_names],
-        7,
-    ]
+def _column_widths(metric_names: list[str], include_loss: bool = True) -> list[int]:
+    widths = [7, 7]
+    if include_loss:
+        widths.append(8)
+    widths.extend([max(8, len(name)) for name in metric_names])
+    widths.append(7)
+    return widths
 
 
 def _format_metric(value: Any) -> str:
@@ -294,13 +301,21 @@ def _is_scalar(value: Any) -> bool:
 
 
 def _ordered_metric_names(metrics: dict[str, Any]) -> list[str]:
-    prefixes = ("clean_", "attack_", "trained_")
+    prefixes = ("clean_", "attack_", "trained_clean_", "trained_adv_", "trained_")
+    metric_order = {
+        "accuracy": 0,
+        "loss": 1,
+        "precision": 2,
+        "recall": 3,
+        "f1": 4,
+    }
 
-    def key(name: str) -> tuple[int, str]:
+    def key(name: str) -> tuple[int, int, str]:
         for index, prefix in enumerate(prefixes):
             if name.startswith(prefix):
-                return index, name.removeprefix(prefix)
-        return len(prefixes), name
+                base_name = name.removeprefix(prefix)
+                return index, metric_order.get(base_name, len(metric_order)), base_name
+        return len(prefixes), metric_order.get(name, len(metric_order)), name
 
     return sorted(metrics, key=key)
 

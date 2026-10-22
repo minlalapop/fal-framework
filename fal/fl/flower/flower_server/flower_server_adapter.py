@@ -6,6 +6,7 @@ from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 import logging
 import math
+import os
 import time
 from types import MethodType
 from typing import Any
@@ -32,6 +33,10 @@ class FlowerServerResult:
     timings: dict[str, Any] = field(default_factory=dict)
 
 
+class _AllClientsFailedError(RuntimeError):
+    """Internal fatal round error preserved across Flower's simulation wrapper."""
+
+
 class FlowerServerAdapter:
     """Start a Flower simulation from prepared client adapters."""
 
@@ -43,6 +48,19 @@ class FlowerServerAdapter:
         verbose: int = 1,
         run_config: dict[str, Any] | None = None,
     ) -> Any:
+        run_config = run_config or {}
+        num_cpus = float(run_config.get("num_cpus", 1.0))
+        num_gpus = float(run_config.get("num_gpus", 0.0))
+        max_concurrent_clients = run_config.get("max_concurrent_clients")
+        _validate_resource_request(
+            num_clients=len(clients),
+            num_cpus=num_cpus,
+            num_gpus=num_gpus,
+            max_concurrent_clients=max_concurrent_clients,
+        )
+        _validate_client_devices(clients, num_gpus=num_gpus)
+        _configure_ray_accelerator_environment()
+
         progress = FALProgressReporter(verbose=verbose)
         progress.start(
             num_rounds=num_rounds,
@@ -88,6 +106,12 @@ class FlowerServerAdapter:
                 server_round=server_round,
                 phase="fit",
                 client_timings=client_timings,
+            )
+            _raise_if_all_clients_failed(
+                results,
+                failures,
+                server_round=server_round,
+                phase="training",
             )
             aggregated = original_aggregate_fit(server_round, results, failures)
             progress.fit_end(
@@ -138,6 +162,12 @@ class FlowerServerAdapter:
                 phase="evaluate",
                 client_timings=client_timings,
             )
+            _raise_if_all_clients_failed(
+                results,
+                failures,
+                server_round=server_round,
+                phase="evaluation",
+            )
             aggregated = original_aggregate_evaluate(server_round, results, failures)
             loss = aggregated[0] if aggregated else None
             metrics = aggregated[1] if aggregated else {}
@@ -161,12 +191,19 @@ class FlowerServerAdapter:
             if owns_ray:
                 ray.init(
                     **_ray_init_args(verbose),
-                    num_cpus=len(clients),
+                    num_cpus=_owned_ray_cpu_budget(
+                        num_clients=len(clients),
+                        num_cpus=num_cpus,
+                        max_concurrent_clients=max_concurrent_clients,
+                    ),
                 )
 
             client_resources = _ray_client_resources(
                 num_clients=len(clients),
                 cluster_resources=ray.cluster_resources(),
+                num_cpus=num_cpus,
+                num_gpus=num_gpus,
+                max_concurrent_clients=max_concurrent_clients,
             )
             client_refs = [ray.put(client) for client in clients]
 
@@ -175,16 +212,22 @@ class FlowerServerAdapter:
                 client = ray.get(client_refs[client_id])
                 return client.to_flower_client()
 
-            with flower_output(verbose):
-                history = fl.simulation.start_simulation(
-                    client_fn=client_fn,
-                    num_clients=len(clients),
-                    config=fl.server.ServerConfig(num_rounds=num_rounds),
-                    strategy=flower_strategy,
-                    ray_init_args=_ray_init_args(verbose),
-                    keep_initialised=True,
-                    client_resources=client_resources,
-                )
+            try:
+                with flower_output(verbose):
+                    history = fl.simulation.start_simulation(
+                        client_fn=client_fn,
+                        num_clients=len(clients),
+                        config=fl.server.ServerConfig(num_rounds=num_rounds),
+                        strategy=flower_strategy,
+                        ray_init_args=_ray_init_args(verbose),
+                        keep_initialised=True,
+                        client_resources=client_resources,
+                    )
+            except Exception as exc:
+                fatal_round_error = _find_all_clients_failed_error(exc)
+                if fatal_round_error is not None:
+                    raise fatal_round_error from fatal_round_error.__cause__
+                raise
         finally:
             if owns_ray and ray.is_initialized():
                 ray.shutdown()
@@ -258,6 +301,48 @@ def _finish_open_rounds(
             round_durations[round_number] = finished_at - started_at
 
 
+def _raise_if_all_clients_failed(
+    results: list[Any],
+    failures: list[Any],
+    *,
+    server_round: int,
+    phase: str,
+) -> None:
+    if results or not failures:
+        return
+
+    message = (
+        f"FAL failed at round {server_round}: all {len(failures)} selected "
+        f"client(s) failed during {phase}."
+    )
+    cause = next(
+        (failure for failure in failures if isinstance(failure, BaseException)),
+        None,
+    )
+    if cause is not None:
+        raise _AllClientsFailedError(message) from cause
+
+    response = failures[0][1] if isinstance(failures[0], tuple) else None
+    status = getattr(response, "status", None)
+    detail = getattr(status, "message", None)
+    if detail:
+        message = f"{message} Original client status: {detail}"
+    raise _AllClientsFailedError(message)
+
+
+def _find_all_clients_failed_error(
+    error: BaseException,
+) -> _AllClientsFailedError | None:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, _AllClientsFailedError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
 def _available_loss(loss: Any) -> float | None:
     if loss is None:
         return None
@@ -292,13 +377,136 @@ def _ray_init_args(verbose: int) -> dict[str, Any]:
 def _ray_client_resources(
     num_clients: int,
     cluster_resources: dict[str, Any],
+    num_cpus: float = 1.0,
+    num_gpus: float = 0.0,
+    max_concurrent_clients: int | None = None,
 ) -> dict[str, float]:
-    available_cpus = max(1.0, float(cluster_resources.get("CPU", 1.0)))
-    concurrent_clients = min(num_clients, max(1, int(available_cpus)))
-    return {
-        "num_cpus": available_cpus / concurrent_clients,
-        "num_gpus": 0.0,
+    _validate_resource_request(
+        num_clients=num_clients,
+        num_cpus=num_cpus,
+        num_gpus=num_gpus,
+        max_concurrent_clients=max_concurrent_clients,
+    )
+    available_cpus = float(cluster_resources.get("CPU", 0.0))
+    available_gpus = float(cluster_resources.get("GPU", 0.0))
+    if available_cpus + 1e-12 < num_cpus:
+        raise ValueError(
+            f"Each FAL client requests {num_cpus:g} CPU(s), but Ray exposes "
+            f"only {available_cpus:g}."
+        )
+    if num_gpus > 0 and available_gpus + 1e-12 < num_gpus:
+        raise ValueError(
+            f"Each FAL client requests {num_gpus:g} GPU(s), but Ray exposes "
+            f"only {available_gpus:g}."
+        )
+
+    concurrency = min(
+        num_clients,
+        max_concurrent_clients or num_clients,
+        max(0, int((available_cpus + 1e-12) / num_cpus)),
+    )
+    if num_gpus > 0:
+        concurrency = min(
+            concurrency,
+            max(0, int((available_gpus + 1e-12) / num_gpus)),
+        )
+    if concurrency < 1:
+        raise ValueError(
+            "Ray cannot schedule one FAL client with the requested CPU/GPU resources."
+        )
+
+    # Flower 1.30 sizes its actor pool from all cluster resources and does not
+    # cap it at num_clients. Reserving spare CPUs prevents surplus actors and
+    # enforces max_concurrent_clients, including for an external Ray session.
+    effective_num_cpus = max(num_cpus, available_cpus / concurrency)
+    resources = {"num_cpus": effective_num_cpus}
+    if num_gpus > 0:
+        resources["num_gpus"] = num_gpus
+    return resources
+
+
+def _validate_resource_request(
+    num_clients: int,
+    num_cpus: float,
+    num_gpus: float,
+    max_concurrent_clients: int | None,
+) -> None:
+    if num_clients <= 0:
+        raise ValueError("At least one FAL client is required.")
+    if not math.isfinite(num_cpus) or num_cpus <= 0:
+        raise ValueError("`num_cpus` must be a positive finite number per client.")
+    if not math.isfinite(num_gpus) or num_gpus < 0:
+        raise ValueError("`num_gpus` must be a non-negative finite number per client.")
+    if max_concurrent_clients is not None and (
+        not isinstance(max_concurrent_clients, int)
+        or isinstance(max_concurrent_clients, bool)
+        or max_concurrent_clients <= 0
+        or max_concurrent_clients > num_clients
+    ):
+        raise ValueError(
+            "`max_concurrent_clients` must be between 1 and `num_clients`."
+        )
+
+
+def _owned_ray_cpu_budget(
+    num_clients: int,
+    num_cpus: float,
+    max_concurrent_clients: int | None,
+) -> int:
+    host_cpus = max(1, os.cpu_count() or 1)
+    if num_cpus > host_cpus:
+        raise ValueError(
+            f"Each FAL client requests {num_cpus:g} CPU(s), but the host exposes "
+            f"only {host_cpus}."
+        )
+    concurrency = min(num_clients, max_concurrent_clients or num_clients)
+    return max(1, min(host_cpus, math.ceil(num_cpus * concurrency)))
+
+
+def _validate_client_devices(clients: list[Any], num_gpus: float) -> None:
+    devices: list[Any] = []
+    for client in clients:
+        for model in (
+            getattr(client, "model", None),
+            getattr(client, "secondary_model", None),
+        ):
+            if model is None or getattr(model, "framework", None) != "pytorch":
+                continue
+            devices.append(getattr(model, "device", "cpu"))
+
+    device_types = {
+        getattr(device, "type", str(device).split(":", 1)[0])
+        for device in devices
     }
+    if "mps" in device_types:
+        raise ValueError(
+            "MPS is not supported by FAL's Ray simulation backend because Ray "
+            "does not schedule Apple GPU resources. Use `device='cpu'`."
+        )
+    if any(
+        getattr(device, "type", None) == "cuda"
+        and getattr(device, "index", None) not in (None, 0)
+        for device in devices
+    ):
+        raise ValueError(
+            "Use `device='cuda'` or `device='cuda:0'` with Ray. Ray selects the "
+            "physical GPU and remaps it to the worker's logical CUDA device 0."
+        )
+    if "cuda" in device_types and num_gpus <= 0:
+        raise ValueError(
+            "A CUDA model requires `num_gpus` greater than zero per client."
+        )
+    if num_gpus > 0 and (not devices or device_types != {"cuda"}):
+        raise ValueError(
+            "`num_gpus` is positive, but every FAL PyTorch model is not configured "
+            "with `model_params={'device': 'cuda'}`."
+        )
+
+
+def _configure_ray_accelerator_environment() -> None:
+    # Ray 2.51 emits a targeted FutureWarning unless its announced future
+    # accelerator-visibility behaviour is explicitly enabled.
+    os.environ.setdefault("RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO", "0")
 
 
 def _strategy_name(strategy: Any) -> str:

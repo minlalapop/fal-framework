@@ -11,7 +11,21 @@ from fal.dataset.base import DatasetLoader
 class BuiltinDatasetLoader(DatasetLoader):
     """Load a named built-in dataset."""
 
-    SUPPORTED_DATASETS: dict[str, Callable[["BuiltinDatasetLoader"], tuple[Any, Any]]] = {}
+    SUPPORTED_DATASETS: dict[
+        str,
+        Callable[["BuiltinDatasetLoader"], tuple[Any, Any]] | type[DatasetLoader],
+    ] = {}
+
+    @classmethod
+    def register(cls, name: str, loader_cls: type[DatasetLoader]) -> None:
+        """Register a named dataset loader without modifying FAL source code."""
+        if not isinstance(loader_cls, type) or not issubclass(loader_cls, DatasetLoader):
+            raise TypeError("Registered dataset loaders must inherit from DatasetLoader.")
+        cls.SUPPORTED_DATASETS[_normalize_name(name)] = loader_cls
+
+    @classmethod
+    def available(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls.SUPPORTED_DATASETS))
 
     def __init__(self, name: str, **params: Any) -> None:
         self.name = _normalize_name(name)
@@ -38,6 +52,8 @@ class BuiltinDatasetLoader(DatasetLoader):
             supported = ", ".join(sorted(self.SUPPORTED_DATASETS))
             raise ValueError(f"Unsupported built-in dataset `{self.name}`. Supported: {supported}.")
 
+        if isinstance(loader, type) and issubclass(loader, DatasetLoader):
+            return loader(**self.params).load()
         return loader(self)
 
     def _load_iris(self) -> tuple[Any, Any]:

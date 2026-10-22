@@ -34,6 +34,8 @@ class MetricFactory:
 
     @classmethod
     def register(cls, name: str, metric_cls: type[BaseMetric]) -> None:
+        if not isinstance(metric_cls, type) or not issubclass(metric_cls, BaseMetric):
+            raise TypeError("Registered metrics must inherit from BaseMetric.")
         cls._registry[cls._normalize_name(name)] = metric_cls
 
     @classmethod

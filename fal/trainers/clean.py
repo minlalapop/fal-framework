@@ -14,10 +14,12 @@ class CleanTrainer(BaseTrainer):
 
     def evaluate(self, data: tuple[Any, Any]) -> EvaluationResult:
         result = super().evaluate(data)
+        metrics = {
+            f"clean_{name}": value
+            for name, value in result.metrics.items()
+        }
+        if result.loss is not None:
+            metrics["clean_loss"] = result.loss
         return EvaluationResult(
-            loss=result.loss,
-            metrics={
-                f"clean_{name}": value
-                for name, value in result.metrics.items()
-            },
+            metrics=metrics,
         )

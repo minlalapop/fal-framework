@@ -17,7 +17,7 @@ class BaseTrainer(ABC):
         self.attack = attack
         self.metrics_manager = metrics_manager
         self.loss_manager = loss_manager
-        self.trainer_params = trainer_params or {}
+        self.trainer_params = trainer_params if trainer_params is not None else {}
         self.last_attack_generation_train_time = 0.0
         self.last_attack_generation_evaluation_time = 0.0
 

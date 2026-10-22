@@ -3,11 +3,20 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
+
+from fal.progress import _format_header, _ordered_metric_names as _ordered_progress_metrics
 from fal.result import FALResult
 
 
 class PickleableModel:
     pass
+
+
+class FakeOptimizer:
+    def __init__(self):
+        self.defaults = {"lr": 0.01, "momentum": 0.9}
+        self.param_groups = [{"params": [object()], "lr": 0.01}]
 
 
 def test_result_export_creates_incremental_run_directories(tmp_path):
@@ -30,6 +39,46 @@ def test_result_export_creates_incremental_run_directories(tmp_path):
     assert Path(second_paths["directory"]).name == "results_2"
     assert (base_dir / "results_1" / "model.pkl").exists()
     assert not (base_dir / "results_2" / "model.pkl").exists()
+
+
+def test_result_exports_safe_reproducibility_config(tmp_path):
+    result = FALResult(
+        model=PickleableModel(),
+        config={
+            "dataset": "digits",
+            "model": PickleableModel(),
+            "model_params": {
+                "optimizer": FakeOptimizer(),
+                "api_token": "must-not-be-exported",
+            },
+            "trainer_type": "mixed",
+            "random_state": 42,
+            "X": np.zeros((8, 4), dtype=np.float32),
+            "y": np.zeros(8, dtype=np.int64),
+        },
+    )
+
+    paths = result.save_outputs(str(tmp_path / "results"), save_model=False)
+
+    with open(paths["config"], encoding="utf-8") as file:
+        config = json.load(file)
+
+    assert config["dataset"] == "array"
+    assert config["array_data"]["X"]["shape"] == [8, 4]
+    assert config["array_data"]["X"]["dtype"] == "float32"
+    assert config["model"]["type"].endswith("PickleableModel")
+    assert config["model_params"]["optimizer"]["defaults"]["lr"] == 0.01
+    assert "params" not in config["model_params"]["optimizer"]["param_groups"][0]
+    assert config["model_params"]["api_token"] == "<redacted>"
+    assert config["random_state"] == 42
+    assert config["timing_unit"] == "seconds"
+    assert config["environment"]["python"]
+    assert "flower" in config["environment"]["libraries"]
+    assert set(config["source"]) == {"git_commit", "git_dirty"}
+
+    exported_text = Path(paths["config"]).read_text(encoding="utf-8")
+    assert "must-not-be-exported" not in exported_text
+    assert "[[0.0" not in exported_text
 
 
 def test_result_export_writes_scalar_and_detailed_metrics_csv(tmp_path):
@@ -106,3 +155,44 @@ def test_result_without_real_loss_has_no_loss_column(tmp_path):
     with open(paths["metrics"], newline="", encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
     assert "loss" not in rows[0]
+
+
+def test_prefixed_losses_are_ordered_beside_matching_accuracies_in_summary_and_csv(tmp_path):
+    ordered_metrics = {
+        "trained_adv_f1": [(1, 0.4)],
+        "attack_loss": [(1, 1.2)],
+        "clean_f1": [(1, 0.8)],
+        "trained_clean_loss": [(1, 0.7)],
+        "attack_accuracy": [(1, 0.5)],
+        "trained_adv_accuracy": [(1, 0.3)],
+        "clean_loss": [(1, 0.4)],
+        "trained_clean_accuracy": [(1, 0.9)],
+        "attack_f1": [(1, 0.45)],
+        "trained_adv_loss": [(1, 1.8)],
+        "clean_accuracy": [(1, 0.95)],
+        "trained_clean_f1": [(1, 0.88)],
+    }
+    result = FALResult(model=PickleableModel(), metrics=ordered_metrics)
+
+    summary_header = result.summary().splitlines()[5].split()
+    assert summary_header == [
+        "round",
+        "clean_accuracy", "clean_loss", "clean_f1",
+        "attack_accuracy", "attack_loss", "attack_f1",
+        "trained_clean_accuracy", "trained_clean_loss", "trained_clean_f1",
+        "trained_adv_accuracy", "trained_adv_loss", "trained_adv_f1",
+    ]
+
+    paths = result.save_outputs(str(tmp_path / "results"), save_model=False)
+    with open(paths["metrics"], newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        assert reader.fieldnames == summary_header
+        rows = list(reader)
+
+    assert "loss" not in rows[0]
+    assert rows[0]["clean_loss"] == "0.4"
+
+    progress_names = _ordered_progress_metrics(ordered_metrics)
+    progress_header = _format_header(progress_names, include_loss=False).split()
+    assert progress_header == ["round", "clients", *summary_header[1:], "time"]
+    assert "loss" not in progress_header

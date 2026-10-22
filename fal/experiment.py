@@ -15,6 +15,7 @@ class Experiment:
         fl_system: Any,
         attack: Any = None,
         verbose: int = 1,
+        config: Any = None,
     ):
         self.dataset_manager = dataset_manager
         self.model = model
@@ -23,6 +24,7 @@ class Experiment:
         self.fl_system = fl_system
         self.attack = attack
         self.verbose = verbose
+        self.config = config
 
     def execute(self) -> Any:
         """
@@ -39,6 +41,8 @@ class Experiment:
             clients_data=clients_data,
             test_data=test_data,
         )
+        if hasattr(results, "config"):
+            results.config = self.config
         if callable(getattr(results, "save_outputs", None)):
             results.save_outputs(save_model=self._should_save_model())
 

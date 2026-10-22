@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
 import logging
-import warnings
 from typing import Iterator
 
 
@@ -25,20 +24,18 @@ def flower_output(verbose: int) -> Iterator[None]:
         for logger in loggers
     ]
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        try:
-            for logger in loggers:
-                logger.setLevel(logging.ERROR)
-                for handler in logger.handlers:
-                    handler.setLevel(logging.ERROR)
-            yield
-        finally:
-            for logger, level, handler_levels in zip(
-                loggers,
-                previous_levels,
-                previous_handler_levels,
-            ):
-                logger.setLevel(level)
-                for handler, handler_level in zip(logger.handlers, handler_levels):
-                    handler.setLevel(handler_level)
+    try:
+        for logger in loggers:
+            logger.setLevel(logging.ERROR)
+            for handler in logger.handlers:
+                handler.setLevel(logging.ERROR)
+        yield
+    finally:
+        for logger, level, handler_levels in zip(
+            loggers,
+            previous_levels,
+            previous_handler_levels,
+        ):
+            logger.setLevel(level)
+            for handler, handler_level in zip(logger.handlers, handler_levels):
+                handler.setLevel(handler_level)

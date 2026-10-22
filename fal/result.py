@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass, field, fields, is_dataclass
+from importlib import metadata
 import json
 import math
+import platform
 import pickle
-from dataclasses import dataclass, field
 from pathlib import Path
 from pprint import pformat
+import subprocess
+import sys
 from typing import Any
 
 
@@ -24,6 +28,7 @@ class FALResult:
     raw_result: Any = None
     timings: dict[str, Any] = field(default_factory=dict)
     artifact_paths: dict[str, str] = field(default_factory=dict)
+    config: Any = None
 
     def __post_init__(self) -> None:
         self.losses = [
@@ -70,6 +75,11 @@ class FALResult:
             self.save_timings(str(timings_path))
             paths["timings"] = str(timings_path)
 
+        if self.config is not None:
+            config_path = output_dir / "config.json"
+            self.save_config(str(config_path))
+            paths["config"] = str(config_path)
+
         self.artifact_paths = paths
         return paths
 
@@ -79,6 +89,19 @@ class FALResult:
         timings_path.parent.mkdir(parents=True, exist_ok=True)
         with timings_path.open("w", encoding="utf-8") as file:
             json.dump(_to_jsonable(self.timings), file, indent=2, ensure_ascii=False)
+
+    def save_config(self, path: str) -> None:
+        """Write a safe, reproducible description of the experiment."""
+        config_path = Path(path)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with config_path.open("w", encoding="utf-8") as file:
+            json.dump(
+                _configuration_payload(self.config),
+                file,
+                indent=2,
+                ensure_ascii=False,
+                allow_nan=False,
+            )
 
     def refresh_timings_output(self) -> None:
         """Refresh the timing artifact after the full public run completes."""
@@ -177,10 +200,271 @@ def _split_metrics(
 
 
 def _clear_known_outputs(output_dir: Path) -> None:
-    for filename in ("model.pkl", "metrics.csv", "detailed_metrics.csv", "timings.json"):
+    for filename in (
+        "model.pkl",
+        "metrics.csv",
+        "detailed_metrics.csv",
+        "timings.json",
+        "config.json",
+    ):
         path = output_dir / filename
         if path.is_file():
             path.unlink()
+
+
+def _configuration_payload(config: Any) -> dict[str, Any]:
+    if is_dataclass(config) and not isinstance(config, type):
+        values = {
+            config_field.name: getattr(config, config_field.name)
+            for config_field in fields(config)
+        }
+    elif isinstance(config, dict):
+        values = dict(config)
+    else:
+        values = {"configuration": config}
+
+    X = values.pop("X", None)
+    y = values.pop("y", None)
+    if X is not None or y is not None:
+        values["dataset"] = "array"
+        values["array_data"] = {
+            "X": _array_metadata(X),
+            "y": _array_metadata(y),
+        }
+
+    payload = {
+        str(name): (
+            "<redacted>"
+            if _is_sensitive_key(name)
+            else _config_jsonable(value)
+        )
+        for name, value in values.items()
+    }
+    payload["timing_unit"] = "seconds"
+    payload["environment"] = _environment_metadata()
+    payload["source"] = _source_metadata()
+    return payload
+
+
+def _config_jsonable(value: Any, seen: set[int] | None = None) -> Any:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    if isinstance(value, Path):
+        return str(value)
+
+    seen = seen if seen is not None else set()
+    identity = id(value)
+    if identity in seen:
+        return {"type": _qualified_type_name(value), "recursive": True}
+
+    if isinstance(value, dict):
+        seen.add(identity)
+        try:
+            return {
+                str(key): (
+                    "<redacted>"
+                    if _is_sensitive_key(key)
+                    else _config_jsonable(item, seen)
+                )
+                for key, item in value.items()
+            }
+        finally:
+            seen.remove(identity)
+
+    if isinstance(value, (list, tuple, set)):
+        seen.add(identity)
+        try:
+            return [_config_jsonable(item, seen) for item in value]
+        finally:
+            seen.remove(identity)
+
+    if hasattr(value, "shape") and hasattr(value, "dtype"):
+        return _parameter_array(value)
+
+    if hasattr(value, "defaults") and hasattr(value, "param_groups"):
+        groups = []
+        for group in value.param_groups:
+            groups.append({
+                str(name): _config_jsonable(item)
+                for name, item in group.items()
+                if name != "params" and not _is_sensitive_key(name)
+            })
+        return {
+            "type": _qualified_type_name(value),
+            "defaults": _config_jsonable(value.defaults),
+            "param_groups": groups,
+        }
+
+    get_params = getattr(value, "get_params", None)
+    if callable(get_params):
+        try:
+            params = get_params(deep=False)
+        except (TypeError, ValueError):
+            params = None
+        if isinstance(params, dict):
+            return {
+                "type": _qualified_type_name(value),
+                "params": _config_jsonable(params),
+            }
+
+    parameters = getattr(value, "parameters", None)
+    state_dict = getattr(value, "state_dict", None)
+    if callable(parameters) and callable(state_dict):
+        try:
+            parameter_count = sum(parameter.numel() for parameter in parameters())
+        except (AttributeError, TypeError):
+            parameter_count = None
+        result = {
+            "type": _qualified_type_name(value),
+            "modules": [
+                {
+                    "name": name,
+                    "type": _qualified_type_name(module),
+                    "configuration": (
+                        module.extra_repr()
+                        if callable(getattr(module, "extra_repr", None))
+                        else ""
+                    ),
+                }
+                for name, module in value.named_modules()
+            ] if callable(getattr(value, "named_modules", None)) else [],
+        }
+        if parameter_count is not None:
+            result["parameter_count"] = int(parameter_count)
+        return result
+
+    if isinstance(value, type) or callable(value):
+        return {"type": _qualified_type_name(value)}
+
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return _config_jsonable(item())
+        except (TypeError, ValueError, RuntimeError):
+            pass
+
+    return {"type": _qualified_type_name(value)}
+
+
+def _array_metadata(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    shape = getattr(value, "shape", None)
+    dtype = getattr(value, "dtype", None)
+    if shape is None:
+        try:
+            shape = (len(value),)
+        except TypeError:
+            shape = None
+    return {
+        "type": _qualified_type_name(value),
+        "shape": list(shape) if shape is not None else None,
+        "dtype": str(dtype) if dtype is not None else None,
+    }
+
+
+def _parameter_array(value: Any) -> dict[str, Any]:
+    result = _array_metadata(value) or {}
+    size = getattr(value, "size", None)
+    size = int(size) if isinstance(size, int) else None
+    numel = getattr(value, "numel", None)
+    if callable(numel):
+        size = int(numel())
+    if size is not None and size <= 256:
+        serializable = value
+        detach = getattr(serializable, "detach", None)
+        if callable(detach):
+            serializable = detach()
+        cpu = getattr(serializable, "cpu", None)
+        if callable(cpu):
+            serializable = cpu()
+        tolist = getattr(serializable, "tolist", None)
+        if callable(tolist):
+            result["values"] = tolist()
+    return result
+
+
+def _qualified_type_name(value: Any) -> str:
+    if isinstance(value, type):
+        return f"{value.__module__}.{value.__qualname__}"
+    if callable(value) and hasattr(value, "__module__") and hasattr(value, "__qualname__"):
+        return f"{value.__module__}.{value.__qualname__}"
+    value_type = type(value)
+    return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
+def _is_sensitive_key(key: Any) -> bool:
+    normalized = str(key).strip().lower().replace("-", "_")
+    sensitive_names = {
+        "access_key",
+        "api_key",
+        "apikey",
+        "credential",
+        "credentials",
+        "password",
+        "passwd",
+        "private_key",
+        "secret",
+        "token",
+    }
+    return normalized in sensitive_names or any(
+        normalized.endswith(f"_{name}")
+        for name in sensitive_names
+    )
+
+
+def _environment_metadata() -> dict[str, Any]:
+    packages = {
+        "fal-framework": "fal-framework",
+        "flower": "flwr",
+        "ray": "ray",
+        "pytorch": "torch",
+        "art": "adversarial-robustness-toolbox",
+        "numpy": "numpy",
+        "scikit-learn": "scikit-learn",
+    }
+    versions = {}
+    for name, distribution in packages.items():
+        try:
+            versions[name] = metadata.version(distribution)
+        except metadata.PackageNotFoundError:
+            versions[name] = None
+
+    return {
+        "python": sys.version.split()[0],
+        "platform": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+        },
+        "libraries": versions,
+    }
+
+
+def _source_metadata() -> dict[str, Any]:
+    repository = Path(__file__).resolve().parents[1]
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=2,
+        ).stdout.strip()
+        dirty = bool(subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=2,
+        ).stdout.strip())
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return {"git_commit": None, "git_dirty": None}
+    return {"git_commit": commit or None, "git_dirty": dirty}
 
 
 def _next_run_directory(base_dir: Path) -> Path:
@@ -412,13 +696,21 @@ def _format_number(value: Any, decimals: int = 4) -> str:
 
 
 def _ordered_metric_names(metrics: dict[str, Any]) -> list[str]:
-    prefixes = ("clean_", "attack_", "trained_")
+    prefixes = ("clean_", "attack_", "trained_clean_", "trained_adv_", "trained_")
+    metric_order = {
+        "accuracy": 0,
+        "loss": 1,
+        "precision": 2,
+        "recall": 3,
+        "f1": 4,
+    }
 
-    def key(name: str) -> tuple[int, str]:
+    def key(name: str) -> tuple[int, int, str]:
         for index, prefix in enumerate(prefixes):
             if name.startswith(prefix):
-                return index, name.removeprefix(prefix)
-        return len(prefixes), name
+                base_name = name.removeprefix(prefix)
+                return index, metric_order.get(base_name, len(metric_order)), base_name
+        return len(prefixes), metric_order.get(name, len(metric_order)), name
 
     return sorted(metrics, key=key)
 

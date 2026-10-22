@@ -67,7 +67,11 @@ class FlowerClientAdapter:
         server_round, client_seed = self._seed_for_call(config, phase="fit")
         self.set_parameters(params)
         started_at = time.perf_counter()
-        self._train(config)
+        try:
+            self._begin_local_training(config)
+            self._train(config)
+        finally:
+            self._end_local_training()
         local_training_time = time.perf_counter() - started_at
         X_train, _ = self.data
         telemetry = {
@@ -109,6 +113,7 @@ class FlowerClientAdapter:
     def to_flower_client(self) -> Any:
         """Return a Flower ``Client`` object when Flower is installed."""
 
+        self._configure_runtime_devices()
         outer = self
 
         class _NumPyClient(fl.client.NumPyClient):
@@ -122,6 +127,31 @@ class FlowerClientAdapter:
                 return outer.evaluate(parameters, config)
 
         return _NumPyClient().to_client()
+
+    def _configure_runtime_devices(self) -> None:
+        for model in (
+            self.model,
+            getattr(self, "secondary_model", None),
+        ):
+            configure_device = getattr(model, "configure_runtime_device", None)
+            if callable(configure_device):
+                configure_device()
+
+    def _begin_local_training(self, config: dict[str, Any] | None) -> None:
+        for model in self._training_models():
+            begin = getattr(model, "_begin_local_training", None)
+            if callable(begin):
+                begin(config)
+
+    def _end_local_training(self) -> None:
+        for model in self._training_models():
+            end = getattr(model, "_end_local_training", None)
+            if callable(end):
+                end()
+
+    def _training_models(self) -> tuple[Any, ...]:
+        secondary_model = getattr(self, "secondary_model", None)
+        return (self.model,) if secondary_model is None else (self.model, secondary_model)
 
     def _train(self, fit_config: dict[str, Any] | None = None) -> None:
         if hasattr(self.trainer, "train"):
@@ -142,11 +172,12 @@ class FlowerClientAdapter:
             return
 
         original_params = dict(trainer_params)
-        self.trainer.trainer_params = {**original_params, **fit_config}
+        trainer_params.update(fit_config)
         try:
             self.trainer.train(self.data)
         finally:
-            self.trainer.trainer_params = original_params
+            trainer_params.clear()
+            trainer_params.update(original_params)
 
     def _evaluate(self, data: tuple[Any, Any]) -> EvaluationResult:
         if hasattr(self.trainer, "evaluate"):

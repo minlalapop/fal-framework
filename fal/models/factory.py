@@ -27,10 +27,33 @@ class ModelAdapterFactory:
         "pytorch": PyTorchModelAdapter,
         "sklearn": SklearnModelAdapter,
     }
+    _detectors: dict[str, Any] = {}
 
     @classmethod
-    def register(cls, name: str, adapter_cls: type[BaseModel]) -> None:
-        cls._registry[cls._normalize_name(name)] = adapter_cls
+    def register(
+        cls,
+        name: str,
+        adapter_cls: type[BaseModel],
+        detector: Any | None = None,
+    ) -> None:
+        name = cls._normalize_name(name)
+        if not isinstance(adapter_cls, type) or not issubclass(adapter_cls, BaseModel):
+            raise TypeError("Registered model adapters must inherit from BaseModel.")
+
+        if name not in {"pytorch", "sklearn"}:
+            detector = detector or getattr(adapter_cls, "supports", None)
+            if not callable(detector):
+                raise TypeError(
+                    "A custom model adapter requires a callable `detector` or "
+                    "a callable `supports(model)` method."
+                )
+            cls._detectors[name] = detector
+
+        cls._registry[name] = adapter_cls
+
+    @classmethod
+    def available(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls._registry))
 
     @classmethod
     def create(cls, model: Any, model_params: dict[str, Any] | None = None) -> BaseModel:
@@ -48,13 +71,35 @@ class ModelAdapterFactory:
         if model_type == "sklearn":
             return adapter_cls(model)
 
-        return adapter_cls(model, **params)
+        adapter = adapter_cls(model, **params)
+        if not isinstance(adapter, BaseModel):
+            raise TypeError("A registered model adapter must create a BaseModel instance.")
+        return adapter
 
-    @staticmethod
-    def _detect_model_type(model: Any) -> str:
+    @classmethod
+    def _detect_model_type(cls, model: Any) -> str:
+        matches = []
         if _is_pytorch_model(model):
-            return "pytorch"
-        if _is_sklearn_model(model):
+            matches.append("pytorch")
+        elif _is_sklearn_instance(model):
+            matches.append("sklearn")
+
+        for name, detector in cls._detectors.items():
+            try:
+                if detector(model):
+                    matches.append(name)
+            except Exception as exc:
+                raise TypeError(f"Model detector for `{name}` failed.") from exc
+
+        if len(matches) > 1:
+            names = ", ".join(sorted(matches))
+            raise TypeError(
+                f"Ambiguous model adapter detection: {names}. "
+                "Pass an explicitly constructed BaseModel adapter as `model`."
+            )
+        if matches:
+            return matches[0]
+        if _looks_like_sklearn_estimator(model):
             return "sklearn"
 
         raise TypeError(
@@ -77,10 +122,13 @@ def _is_pytorch_model(model: Any) -> bool:
 
 
 def _is_sklearn_model(model: Any) -> bool:
-    if BaseEstimator is None:
-        return _looks_like_sklearn_estimator(model)
+    return _is_sklearn_instance(model) or _looks_like_sklearn_estimator(model)
 
-    return isinstance(model, BaseEstimator) or _looks_like_sklearn_estimator(model)
+
+def _is_sklearn_instance(model: Any) -> bool:
+    if BaseEstimator is None:
+        return False
+    return isinstance(model, BaseEstimator)
 
 
 def _looks_like_sklearn_estimator(model: Any) -> bool:

@@ -52,11 +52,6 @@ class AdversarialTrainer(BaseTrainer):
             if epochs < 1 or batch_size < 2:
                 raise ValueError("Invalid epochs or batch_size.")
 
-            if float(params.get("proximal_mu", 0.0) or 0.0) > 0:
-                raise NotImplementedError(
-                    "Online adversarial training does not yet support FedProx."
-                )
-
             clean_batch_size = batch_size // 2
             attack_time = 0.0
 
@@ -154,7 +149,7 @@ class AdversarialTrainer(BaseTrainer):
         self,
         data: tuple[Any, Any],
     ) -> EvaluationResult:
-        """Evaluate both subsets; loss remains defined on their 50/50 mixture."""
+        """Evaluate the adversarially trained model on clean and attacked data."""
 
         if self.attack is None:
             raise ValueError("AdversarialTrainer requires an attack.")
@@ -206,15 +201,19 @@ class AdversarialTrainer(BaseTrainer):
             for name, value in adversarial_metrics.items()
         })
 
-        # Flower exposes one scalar loss; retain its existing 50/50 definition.
-        loss = (
-            self.loss_manager.compute(self.model, X_mix, y_mix)
-            if self.loss_manager
-            else None
-        )
+        if self.loss_manager:
+            metrics["trained_clean_loss"] = self.loss_manager.compute(
+                self.model,
+                X_test,
+                y_test,
+            )
+            metrics["trained_adv_loss"] = self.loss_manager.compute(
+                self.model,
+                X_adv,
+                y_test,
+            )
 
         return EvaluationResult(
-            loss=loss,
             metrics=metrics,
         )
 

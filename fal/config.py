@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
+from numbers import Real
 from typing import Any, Mapping
 
 
@@ -52,6 +54,9 @@ class FALConfig:
 
     num_clients: int = 2
     num_rounds: int = 1
+    num_cpus: float = 1.0
+    num_gpus: float = 0.0
+    max_concurrent_clients: int | None = None
     test_size: float = 0.2
     iid: bool = True
     shards_per_client: int = 2
@@ -64,6 +69,7 @@ class FALConfig:
     fl_params: dict[str, Any] = field(default_factory=dict)
 
     attack_backend: str = "art"
+    attack_backend_params: dict[str, Any] = field(default_factory=dict)
     verbose: int = 1
 
     def __post_init__(self) -> None:
@@ -121,27 +127,40 @@ class FALConfig:
         _ensure_mapping(self.dataset_params, "dataset_params")
         _ensure_mapping(self.model_params, "model_params")
         _ensure_mapping(self.attack_params, "attack_params")
+        _ensure_mapping(self.attack_backend_params, "attack_backend_params")
         _ensure_mapping(self.trainer_params, "trainer_params")
         _ensure_mapping(self.fl_params, "fl_params")
 
     def _validate_training(self) -> None:
-        if self.trainer_type not in SUPPORTED_TRAINERS:
-            supported = ", ".join(sorted(SUPPORTED_TRAINERS))
-            raise ValueError(f"Unsupported trainer_type `{self.trainer_type}`. Supported: {supported}.")
+        from fal.adv import AttackBackendFactory, AttackFactory
+        from fal.trainers import TrainerFactory
 
-        if self.attack_type is not None and self.attack_type not in SUPPORTED_ATTACKS:
-            supported = ", ".join(sorted(SUPPORTED_ATTACKS))
-            raise ValueError(f"Unsupported attack_type `{self.attack_type}`. Supported: {supported}.")
+        _ensure_registered(
+            self.trainer_type,
+            TrainerFactory.available(),
+            "trainer_type",
+        )
 
-        if self.attack_backend not in SUPPORTED_ATTACK_BACKENDS:
-            supported = ", ".join(sorted(SUPPORTED_ATTACK_BACKENDS))
-            raise ValueError(f"Unsupported attack_backend `{self.attack_backend}`. Supported: {supported}.")
+        if self.attack_type is not None:
+            _ensure_registered(
+                self.attack_type,
+                AttackFactory.available(),
+                "attack_type",
+            )
+
+        _ensure_registered(
+            self.attack_backend,
+            AttackBackendFactory.available(),
+            "attack_backend",
+        )
 
         attack_trainers = {"attack_only", "adversarial", "comparison", "mixed"}
         if self.trainer_type in attack_trainers and self.attack_type is None:
             raise ValueError(f"`trainer_type='{self.trainer_type}'` requires `attack_type`.")
 
     def _validate_metrics(self) -> None:
+        from fal.evaluation.metrics import MetricFactory
+
         if not self.metrics:
             raise ValueError("At least one metric is required.")
 
@@ -150,13 +169,16 @@ class FALConfig:
             for name in (_get_metric_name(metric) for metric in self.metrics)
             if name is not None
         ]
-        unsupported = sorted(set(metric_names) - SUPPORTED_METRICS)
+        supported_metrics = MetricFactory.available()
+        unsupported = sorted(set(metric_names) - set(supported_metrics))
         if unsupported:
-            supported = ", ".join(sorted(SUPPORTED_METRICS))
+            supported = ", ".join(supported_metrics)
             names = ", ".join(unsupported)
             raise ValueError(f"Unsupported metrics: {names}. Supported: {supported}.")
 
     def _validate_loss(self) -> None:
+        from fal.evaluation.losses import LossFactory
+
         if self.loss is None:
             return
 
@@ -164,16 +186,19 @@ class FALConfig:
             return
 
         loss_name = self.loss if isinstance(self.loss, str) else self.loss.get("name") or self.loss.get("loss")
-        if loss_name not in SUPPORTED_LOSSES:
-            supported = ", ".join(sorted(SUPPORTED_LOSSES))
-            raise ValueError(f"Unsupported loss `{loss_name}`. Supported: {supported}.")
+        _ensure_registered(loss_name, LossFactory.available(), "loss")
 
     def _validate_federated_learning(self) -> None:
+        from fal.fl import FLBackendFactory
+        from fal.fl.flower.flower_strategy import StrategyFactory
+
         if not isinstance(self.num_clients, int) or self.num_clients <= 0:
             raise ValueError("`num_clients` must be a positive integer.")
 
         if not isinstance(self.num_rounds, int) or self.num_rounds <= 0:
             raise ValueError("`num_rounds` must be a positive integer.")
+
+        self._validate_client_resources()
 
         if not 0 < self.test_size < 1:
             raise ValueError("`test_size` must be between 0 and 1.")
@@ -181,13 +206,43 @@ class FALConfig:
         if not isinstance(self.shards_per_client, int) or self.shards_per_client <= 0:
             raise ValueError("`shards_per_client` must be a positive integer.")
 
-        if self.fl_backend not in SUPPORTED_FL_BACKENDS:
-            supported = ", ".join(sorted(SUPPORTED_FL_BACKENDS))
-            raise ValueError(f"Unsupported fl_backend `{self.fl_backend}`. Supported: {supported}.")
+        _ensure_registered(
+            self.fl_backend,
+            FLBackendFactory.available(),
+            "fl_backend",
+        )
+        _ensure_registered(
+            self.fl_algorithm,
+            StrategyFactory.available(),
+            "fl_algorithm",
+        )
 
-        if self.fl_algorithm not in SUPPORTED_FL_ALGORITHMS:
-            supported = ", ".join(sorted(SUPPORTED_FL_ALGORITHMS))
-            raise ValueError(f"Unsupported fl_algorithm `{self.fl_algorithm}`. Supported: {supported}.")
+    def _validate_client_resources(self) -> None:
+        if (
+            not isinstance(self.num_cpus, Real)
+            or isinstance(self.num_cpus, bool)
+            or not math.isfinite(float(self.num_cpus))
+            or float(self.num_cpus) <= 0
+        ):
+            raise ValueError("`num_cpus` must be a positive finite number per client.")
+
+        if (
+            not isinstance(self.num_gpus, Real)
+            or isinstance(self.num_gpus, bool)
+            or not math.isfinite(float(self.num_gpus))
+            or float(self.num_gpus) < 0
+        ):
+            raise ValueError("`num_gpus` must be a non-negative finite number per client.")
+
+        if self.max_concurrent_clients is not None:
+            if (
+                not isinstance(self.max_concurrent_clients, int)
+                or isinstance(self.max_concurrent_clients, bool)
+                or self.max_concurrent_clients <= 0
+            ):
+                raise ValueError("`max_concurrent_clients` must be a positive integer or None.")
+            if self.max_concurrent_clients > self.num_clients:
+                raise ValueError("`max_concurrent_clients` cannot exceed `num_clients`.")
 
     def _validate_runtime(self) -> None:
         if not isinstance(self.verbose, int) or self.verbose < 0:
@@ -215,6 +270,14 @@ def _normalize_required_name(value: str, field_name: str) -> str:
 def _ensure_mapping(value: Mapping[str, Any], field_name: str) -> None:
     if not isinstance(value, dict):
         raise ValueError(f"`{field_name}` must be a dictionary.")
+
+
+def _ensure_registered(value: str, available: tuple[str, ...], field_name: str) -> None:
+    if value not in available:
+        supported = ", ".join(available)
+        raise ValueError(
+            f"Unsupported {field_name} `{value}`. Supported: {supported}."
+        )
 
 
 def _normalize_loss_config(value: Any | None) -> Any | None:

@@ -92,8 +92,7 @@ class MixedTrainer(BaseTrainer):
         metrics.update(attack_result.metrics)
         metrics.update(trained_result.metrics)
 
-        # This remains AdversarialTrainer's 50/50 clean/adversarial loss.
-        return EvaluationResult(loss=trained_result.loss, metrics=metrics)
+        return EvaluationResult(metrics=metrics)
 
 
 def _capture_rng_state(model: Any) -> dict[str, Any]:

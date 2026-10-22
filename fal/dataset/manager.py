@@ -34,7 +34,19 @@ class DatasetManager:
         self.test_data: tuple[Any, Any] | None = None
 
     def prepare(self) -> "DatasetManager":
-        X, y = self.loader.load()
+        loaded = self.loader.load()
+        if not isinstance(loaded, (tuple, list)) or len(loaded) != 2:
+            raise TypeError("DatasetLoader.load() must return exactly `(X, y)`.")
+        X, y = loaded
+        try:
+            num_samples = len(X)
+            num_labels = len(y)
+        except TypeError as exc:
+            raise TypeError("Dataset features and labels must be sized collections.") from exc
+        if num_samples != num_labels:
+            raise ValueError(
+                "Dataset features and labels must contain the same number of samples."
+            )
         X_train, X_test, y_train, y_test = self._train_test_split(X, y)
 
         self.clients_data = self.splitter.split(X_train, y_train, self.num_clients)

@@ -1,6 +1,7 @@
 from .clean import CleanTrainer
 from .attack_only import AttackOnlyTrainer
 from .adversarial import AdversarialTrainer
+from .base import BaseTrainer
 from .mixed import MixedTrainer
 
 
@@ -15,7 +16,13 @@ class TrainerFactory:
 
     @classmethod
     def register(cls, name, trainer_cls):
+        if not isinstance(trainer_cls, type) or not issubclass(trainer_cls, BaseTrainer):
+            raise TypeError("Registered trainers must inherit from BaseTrainer.")
         cls._registry[cls._normalize_name(name)] = trainer_cls
+
+    @classmethod
+    def available(cls):
+        return tuple(sorted(cls._registry))
 
     @classmethod
     def create(

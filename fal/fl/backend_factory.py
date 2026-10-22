@@ -16,7 +16,13 @@ class FLBackendFactory:
 
     @classmethod
     def register(cls, name: str, backend_cls: type[FLBackend]) -> None:
+        if not isinstance(backend_cls, type) or not issubclass(backend_cls, FLBackend):
+            raise TypeError("Registered FL backends must inherit from FLBackend.")
         cls._registry[cls._normalize_name(name)] = backend_cls
+
+    @classmethod
+    def available(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls._registry))
 
     @classmethod
     def create(cls, backend_name: str = "flower") -> FLBackend:

@@ -38,5 +38,7 @@ class AttackOnlyTrainer(BaseTrainer):
             for name, value in self.metrics_manager.compute_all(y_test, y_pred).items()
         }
         loss = self.loss_manager.compute(self.model, X_adv, y_test) if self.loss_manager else None
+        if loss is not None:
+            metrics["attack_loss"] = loss
 
-        return EvaluationResult(loss=loss, metrics=metrics)
+        return EvaluationResult(metrics=metrics)

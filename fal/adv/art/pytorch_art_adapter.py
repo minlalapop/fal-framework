@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from fal.adv.art.art_model_adapter import ARTModelAdapter
+from fal.adv.art.art_model_adapter import ARTModelAdapter, validate_clip_values
 
 
 class PyTorchARTAdapter(ARTModelAdapter):
@@ -24,6 +24,9 @@ class PyTorchARTAdapter(ARTModelAdapter):
         y: Any | None = None,
     ) -> Any:
         config = self._complete_config(model, config, X, y)
+        configure_device = getattr(model, "configure_runtime_device", None)
+        if callable(configure_device):
+            configure_device()
         criterion = config.get("criterion") or getattr(model, "criterion", None)
         optimizer = config.get("optimizer") or getattr(model, "optimizer", None)
 
@@ -37,6 +40,7 @@ class PyTorchARTAdapter(ARTModelAdapter):
             input_shape=config["input_shape"],
             nb_classes=config["nb_classes"],
             clip_values=config.get("clip_values"),
+            device_type=config["device_type"],
         )
 
     def _complete_config(
@@ -47,6 +51,14 @@ class PyTorchARTAdapter(ARTModelAdapter):
         y: Any | None,
     ) -> dict[str, Any]:
         completed = dict(config)
+        expected_device_type = _art_device_type(model)
+        configured_device_type = completed.get("device_type")
+        if configured_device_type is not None and configured_device_type != expected_device_type:
+            raise ValueError(
+                "ART `device_type` conflicts with the PyTorch model device: "
+                f"expected `{expected_device_type}`, got `{configured_device_type}`."
+            )
+        completed["device_type"] = expected_device_type
 
         if completed.get("input_shape") is None:
             completed["input_shape"] = _infer_input_shape(X)
@@ -56,8 +68,24 @@ class PyTorchARTAdapter(ARTModelAdapter):
 
         if completed.get("clip_values") is None:
             completed["clip_values"] = _infer_clip_values(X)
+        completed["clip_values"] = validate_clip_values(completed["clip_values"], X)
 
         return completed
+
+
+def _art_device_type(model: Any) -> str:
+    device = getattr(model, "device", None)
+    device_type = getattr(device, "type", str(device or "cpu").split(":", 1)[0])
+    if device_type == "cuda":
+        return "gpu"
+    if device_type == "cpu":
+        return "cpu"
+    if device_type == "mps":
+        raise ValueError(
+            "ART 1.20 does not provide an MPS device mode. "
+            "Use `device='cpu'` or a CUDA device for adversarial attacks."
+        )
+    raise ValueError(f"ART does not support PyTorch device `{device}` in FAL.")
 
 
 def _require_pytorch_classifier() -> Any:
@@ -124,4 +152,4 @@ def _infer_clip_values(X: Any | None) -> tuple[float, float] | None:
     if min_value >= 0.0 and max_value <= 1.0:
         return 0.0, 1.0
 
-    return min_value, max_value
+    return None

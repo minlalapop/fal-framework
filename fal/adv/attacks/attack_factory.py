@@ -22,7 +22,13 @@ class AttackFactory:
 
     @classmethod
     def register(cls, name: str, attack_cls: type[BaseAttack]) -> None:
+        if not isinstance(attack_cls, type) or not issubclass(attack_cls, BaseAttack):
+            raise TypeError("Registered attacks must inherit from BaseAttack.")
         cls._registry[cls._normalize_name(name)] = attack_cls
+
+    @classmethod
+    def available(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls._registry))
 
     @classmethod
     def create(

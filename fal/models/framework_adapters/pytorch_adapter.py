@@ -24,6 +24,7 @@ class PyTorchModelAdapter(BaseModel):
         self.device = model_params.get("device")
 
         self._torch = _require_torch()
+        self._local_training_reference: list[Any] | None = None
         self._validate_model()
         self._configure_device()
         self._validate_training_params()
@@ -33,10 +34,13 @@ class PyTorchModelAdapter(BaseModel):
         return "pytorch"
 
     def fit(self, X: Any, y: Any, **params: Any) -> "PyTorchModelAdapter":
+        self.configure_runtime_device()
         epochs = int(params.get("local_steps", params.get("epochs", self.epochs)))
         batch_size = int(params.get("batch_size", self.batch_size))
         proximal_mu = float(params.get("proximal_mu", 0.0) or 0.0)
-        global_params = self._snapshot_parameters() if proximal_mu > 0 else None
+        global_params = self._local_training_reference
+        if proximal_mu > 0 and global_params is None:
+            global_params = self._snapshot_parameters()
 
         dataset = self._make_tensor_dataset(X, y)
         loader = self._torch.utils.data.DataLoader(
@@ -61,6 +65,7 @@ class PyTorchModelAdapter(BaseModel):
         return self
 
     def predict(self, X: Any) -> Any:
+        self.configure_runtime_device()
         tensor_X = self._to_tensor(X)
         loader = self._torch.utils.data.DataLoader(
             self._torch.utils.data.TensorDataset(tensor_X),
@@ -86,6 +91,25 @@ class PyTorchModelAdapter(BaseModel):
     def get_raw_model(self) -> Any:
         return self.model
 
+    def configure_runtime_device(self) -> "PyTorchModelAdapter":
+        """Move model, criterion, and optimizer state to the requested device."""
+
+        self._validate_device_available(self.device)
+        self.model.to(self.device)
+        if callable(getattr(self.criterion, "to", None)):
+            self.criterion.to(self.device)
+        self._move_optimizer_state(self.device)
+        return self
+
+    def _begin_local_training(self, params: dict[str, Any] | None = None) -> None:
+        proximal_mu = float((params or {}).get("proximal_mu", 0.0) or 0.0)
+        self._local_training_reference = (
+            self._snapshot_parameters() if proximal_mu > 0 else None
+        )
+
+    def _end_local_training(self) -> None:
+        self._local_training_reference = None
+
     def clone(self) -> "PyTorchModelAdapter":
         cloned_model = copy.deepcopy(self.model)
         cloned_criterion = copy.deepcopy(self.criterion)
@@ -108,9 +132,73 @@ class PyTorchModelAdapter(BaseModel):
 
     def _configure_device(self) -> None:
         if self.device is None:
-            self.device = "cuda" if self._torch.cuda.is_available() else "cpu"
-        self.device = self._torch.device(self.device)
-        self.model.to(self.device)
+            self.device = "cpu"
+        try:
+            self.device = self._torch.device(self.device)
+        except (RuntimeError, TypeError) as exc:
+            raise ValueError(f"Unsupported PyTorch device `{self.device}`.") from exc
+        self._validate_device_available(self.device)
+
+        # Keep serialised client templates on CPU. Flower/Ray workers move their
+        # own copy to the requested runtime device after Ray assigns accelerators.
+        self.model.to("cpu")
+        if callable(getattr(self.criterion, "to", None)):
+            self.criterion.to("cpu")
+        self._move_optimizer_state(self._torch.device("cpu"))
+
+    def _validate_device_available(self, device: Any) -> None:
+        if device.type == "cpu":
+            return
+
+        if device.type == "cuda":
+            if not self._torch.cuda.is_available():
+                raise ValueError(
+                    "PyTorch device `cuda` was requested, but CUDA is not available. "
+                    "Use `device='cpu'` or run on a CUDA-enabled host."
+                )
+            if device.index is not None and device.index >= self._torch.cuda.device_count():
+                raise ValueError(
+                    f"PyTorch device `{device}` does not exist; "
+                    f"CUDA exposes {self._torch.cuda.device_count()} device(s)."
+                )
+            return
+
+        if device.type == "mps":
+            mps = getattr(self._torch.backends, "mps", None)
+            if mps is None or not mps.is_available():
+                raise ValueError(
+                    "PyTorch device `mps` was requested, but MPS is not available."
+                )
+            return
+
+        raise ValueError(
+            f"Unsupported PyTorch device `{device}`. FAL supports `cpu`, `cuda`, "
+            "and validates `mps` separately."
+        )
+
+    def _move_optimizer_state(self, device: Any) -> None:
+        state = getattr(self.optimizer, "state", None)
+        if not isinstance(state, dict):
+            return
+        for parameter_state in state.values():
+            if not isinstance(parameter_state, dict):
+                continue
+            for name, value in parameter_state.items():
+                parameter_state[name] = self._move_value_to_device(value, device)
+
+    def _move_value_to_device(self, value: Any, device: Any) -> Any:
+        if self._torch.is_tensor(value):
+            return value.to(device)
+        if isinstance(value, dict):
+            return {
+                name: self._move_value_to_device(item, device)
+                for name, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._move_value_to_device(item, device) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._move_value_to_device(item, device) for item in value)
+        return value
 
     def _validate_training_params(self) -> None:
         if self.criterion is None:

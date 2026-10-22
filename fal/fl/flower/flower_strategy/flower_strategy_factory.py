@@ -21,7 +21,13 @@ class StrategyFactory:
 
     @classmethod
     def register(cls, name: str, strategy_cls: type[StrategyAdapter]) -> None:
+        if not isinstance(strategy_cls, type) or not issubclass(strategy_cls, StrategyAdapter):
+            raise TypeError("Registered strategies must inherit from StrategyAdapter.")
         cls._registry[cls._normalize_name(name)] = strategy_cls
+
+    @classmethod
+    def available(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls._registry))
 
     @classmethod
     def create(

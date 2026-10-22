@@ -7,6 +7,7 @@ from fal.dataset import (
     ArrayDatasetLoader,
     BuiltinDatasetLoader,
     CustomCSVDatasetLoader,
+    DatasetLoader,
     DatasetManager,
     IIDSplitter,
     NonIIDSplitter,
@@ -50,6 +51,7 @@ class CoreBuilder:
             attack=attack,
             fl_system=fl_system,
             verbose=self.config.verbose,
+            config=self.config,
         )
 
     def _build_dataset_manager(self):
@@ -65,6 +67,9 @@ class CoreBuilder:
     def _build_dataset_loader(self):
         if self.config.X is not None or self.config.y is not None:
             return ArrayDatasetLoader(self.config.X, self.config.y)
+
+        if isinstance(self.config.dataset, DatasetLoader):
+            return self.config.dataset
 
         if isinstance(self.config.dataset, str) and self.config.dataset.lower().endswith(".csv"):
             return CustomCSVDatasetLoader(self.config.dataset, self.config.target)
@@ -97,7 +102,8 @@ class CoreBuilder:
             return None
 
         backend = AttackBackendFactory.create(
-            self.config.attack_backend
+            self.config.attack_backend,
+            backend_params=dict(self.config.attack_backend_params),
         )
 
         return AttackFactory.create(
@@ -169,6 +175,9 @@ class CoreBuilder:
             "loss": self._loss_name(),
             "random_state": self.config.random_state,
             "deterministic": self.config.deterministic,
+            "num_cpus": float(self.config.num_cpus),
+            "num_gpus": float(self.config.num_gpus),
+            "max_concurrent_clients": self.config.max_concurrent_clients,
         }
 
     def _build_attack_display_config(self):
