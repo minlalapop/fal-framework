@@ -34,6 +34,10 @@ pip-wheel-metadata/
 # Generated documentation
 site/
 
+# Local architecture diagrams
+/uml/
+/classes.png
+
 # Local datasets and experiment outputs
 data/
 results/
