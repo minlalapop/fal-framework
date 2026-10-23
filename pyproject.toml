@@ -4,16 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fal-framework"
-version = "0.2.1"
+version = "0.2.2"
 description = "Federated Adversarial Learning framework."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "adversarial-robustness-toolbox",
-    "flwr[simulation]>=1.30.0,<1.31.0",
+    "flwr[simulation]>=1.30.0",
     "numpy",
     "pandas",
-    "ray[default]==2.51.1",
     "scikit-learn",
     "torch",
     "torchvision",

@@ -4,7 +4,7 @@ import warnings
 import numpy as np
 import pytest
 from flwr.common import ndarrays_to_parameters
-from flwr.common.record.configrecord import ConfigRecord
+from flwr.common import ConfigRecord
 
 from fal.fl.flower.flower_client.flower_client_adapter import FAL_TELEMETRY_PREFIX
 from fal.fl.flower.flower_server.flower_server_adapter import (
